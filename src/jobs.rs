@@ -41,6 +41,13 @@ pub enum JobKind {
     SiteList,
     EnvList { site: String },
     EnvInfo { site: String, env: String },
+    OrgList { site: String },
+    TagList { site: String, org: String },
+    Metrics {
+        site: String,
+        env: String,
+        period: String,
+    },
 }
 
 impl JobKind {
@@ -53,6 +60,9 @@ impl JobKind {
                 | Self::SiteList
                 | Self::EnvList { .. }
                 | Self::EnvInfo { .. }
+                | Self::OrgList { .. }
+                | Self::TagList { .. }
+                | Self::Metrics { .. }
         )
     }
 }

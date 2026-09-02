@@ -223,6 +223,8 @@ fn inflight_key(kind: &JobKind) -> Option<String> {
         JobKind::SiteList => Some("site:list".into()),
         JobKind::EnvList { site } => Some(format!("env:list:{site}")),
         JobKind::EnvInfo { site, env } => Some(format!("env:info:{site}.{env}")),
+        JobKind::OrgList { site } => Some(format!("org:list:{site}")),
+        JobKind::TagList { site, org } => Some(format!("tag:list:{site}:{org}")),
         _ => None,
     }
 }
@@ -345,6 +347,8 @@ pub fn refresh(state: &mut AppState) {
         }
         TreeSel::None => {}
     }
+    crate::workflows::tags::refresh_selected(state);
+    crate::workflows::metrics::refresh_selected(state);
 }
 
 pub fn apply_site_list(state: &mut AppState, json: &str) {

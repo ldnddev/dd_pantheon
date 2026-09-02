@@ -1,6 +1,7 @@
 use crate::models::{LayoutId, MetricsPeriod};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -17,6 +18,9 @@ pub struct AppConfig {
     pub last_env: Option<String>,
     #[serde(default)]
     pub metrics_period: MetricsPeriod,
+    /// Last-picked org **id** (UUID) per terminus site name.
+    #[serde(default)]
+    pub orgs: HashMap<String, String>,
 }
 
 impl Default for AppConfig {
@@ -26,6 +30,7 @@ impl Default for AppConfig {
             last_site: None,
             last_env: None,
             metrics_period: MetricsPeriod::Day,
+            orgs: HashMap::new(),
         }
     }
 }

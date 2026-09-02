@@ -23,7 +23,12 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
 
     let text_field = matches!(
         state.modal,
-        Some(Modal::Filter { .. } | Modal::Login { .. } | Modal::LiveGate { .. })
+        Some(
+            Modal::Filter { .. }
+                | Modal::Login { .. }
+                | Modal::LiveGate { .. }
+                | Modal::TagAdd { .. },
+        )
     );
 
     if !text_field {
@@ -84,6 +89,7 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
         }
         KeyCode::Esc => {
             state.filter.clear();
+            state.tag_filter = None;
             state.rebuild_tree();
             state.select_matching_row();
             return Ok(false);
@@ -124,6 +130,82 @@ fn handle_modal(state: &mut AppState, key: KeyEvent, modal: Modal) -> Result<boo
                 state.modal = Some(Modal::Filter { query });
             }
             _ => {}
+        },
+        Modal::TagAdd { mut value } => match key.code {
+            KeyCode::Esc => state.modal = None,
+            KeyCode::Enter => {
+                state.modal = None;
+                crate::workflows::tags::submit_add(state, value);
+            }
+            KeyCode::Backspace => {
+                value.pop();
+                state.modal = Some(Modal::TagAdd { value });
+            }
+            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                value.push(c);
+                state.modal = Some(Modal::TagAdd { value });
+            }
+            _ => {}
+        },
+        Modal::OrgPicker {
+            site,
+            orgs,
+            mut selected,
+        } => match key.code {
+            KeyCode::Esc => state.modal = None,
+            KeyCode::Char('j') | KeyCode::Down => {
+                if !orgs.is_empty() {
+                    selected = (selected + 1).min(orgs.len() - 1);
+                }
+                state.modal = Some(Modal::OrgPicker {
+                    site,
+                    orgs,
+                    selected,
+                });
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                selected = selected.saturating_sub(1);
+                state.modal = Some(Modal::OrgPicker {
+                    site,
+                    orgs,
+                    selected,
+                });
+            }
+            KeyCode::Enter => {
+                if let Some(org) = orgs.get(selected).cloned() {
+                    state.modal = None;
+                    crate::workflows::tags::pick_org(state, &site, org);
+                }
+            }
+            _ => {
+                state.modal = Some(Modal::OrgPicker {
+                    site,
+                    orgs,
+                    selected,
+                });
+            }
+        },
+        Modal::TagPicker { tags, mut selected } => match key.code {
+            KeyCode::Esc => state.modal = None,
+            KeyCode::Char('j') | KeyCode::Down => {
+                if !tags.is_empty() {
+                    selected = (selected + 1).min(tags.len() - 1);
+                }
+                state.modal = Some(Modal::TagPicker { tags, selected });
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                selected = selected.saturating_sub(1);
+                state.modal = Some(Modal::TagPicker { tags, selected });
+            }
+            KeyCode::Enter => {
+                if let Some(tag) = tags.get(selected).cloned() {
+                    state.modal = None;
+                    crate::workflows::tags::pin_filter(state, tag);
+                }
+            }
+            _ => {
+                state.modal = Some(Modal::TagPicker { tags, selected });
+            }
         },
         Modal::Help { scroll } => match key.code {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::F(1) => state.modal = None,
@@ -304,18 +386,7 @@ fn handle_tree(state: &mut AppState, key: KeyEvent) -> Result<bool> {
                 query: state.filter.clone(),
             });
         }
-        KeyCode::Char('T') => {
-            let tag = state
-                .selected_site()
-                .and_then(|s| s.tags.first().map(|t| t.name.clone()));
-            state.tag_filter = match (state.tag_filter.clone(), tag) {
-                (Some(_), _) => None,
-                (None, Some(t)) => Some(t),
-                (None, None) => None,
-            };
-            state.rebuild_tree();
-            state.select_matching_row();
-        }
+        KeyCode::Char('T') => crate::workflows::tags::open_tag_picker(state),
         other => shared_action_keys(state, other),
     }
     Ok(false)
@@ -354,11 +425,23 @@ fn handle_inspector(state: &mut AppState, key: KeyEvent) -> Result<bool> {
         KeyCode::Char('h') | KeyCode::Left => {
             if state.layout == crate::models::LayoutId::TabbedInspector {
                 state.inspector_tab = state.inspector_tab.prev();
+            } else {
+                crate::workflows::tags::cycle_chip(state, -1);
             }
         }
         KeyCode::Char('l') | KeyCode::Right => {
             if state.layout == crate::models::LayoutId::TabbedInspector {
                 state.inspector_tab = state.inspector_tab.next();
+            } else {
+                crate::workflows::tags::cycle_chip(state, 1);
+            }
+        }
+        KeyCode::Char('[') => crate::workflows::tags::cycle_chip(state, -1),
+        KeyCode::Char(']') => crate::workflows::tags::cycle_chip(state, 1),
+        KeyCode::Char('T') => crate::workflows::tags::open_tag_picker(state),
+        KeyCode::Char('x') => {
+            if let Some(tag) = state.selected_chip.clone() {
+                crate::workflows::tags::stage_remove(state, &tag);
             }
         }
         KeyCode::Char('/') => {
@@ -454,6 +537,16 @@ pub fn handle_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
                 }
             } else if contains(state.inspector_area, x, y) {
                 state.focus = FocusPane::Inspector;
+                let chips = state.tag_chips.clone();
+                if let Some(chip) = chips
+                    .iter()
+                    .find(|c| contains(c.close, x, y) && c.close.width > 0)
+                {
+                    crate::workflows::tags::stage_remove(state, &chip.name);
+                } else if let Some(chip) = chips.iter().find(|c| contains(c.body, x, y)) {
+                    state.selected_chip = Some(chip.name.clone());
+                    crate::workflows::tags::pin_filter(state, chip.name.clone());
+                }
             } else if contains(state.preview_area, x, y) {
                 state.focus = FocusPane::Preview;
             } else if contains(state.log_area, x, y) {

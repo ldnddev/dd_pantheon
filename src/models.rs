@@ -227,6 +227,14 @@ impl MetricsPeriod {
             Self::Month => "month",
         }
     }
+
+    pub fn key_label(self) -> &'static str {
+        match self {
+            Self::Day => "d",
+            Self::Week => "w",
+            Self::Month => "M",
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

@@ -111,6 +111,15 @@ fn draw_modal(f: &mut Frame, state: &mut AppState, area: Rect) {
         }) => {
             modals::draw_livegate(f, &state.theme, modal_area, &plan, &expected, &typed);
         }
+        Some(Modal::TagAdd { value }) => {
+            modals::draw_tag_add(f, &state.theme, modal_area, &value);
+        }
+        Some(Modal::OrgPicker { orgs, selected, .. }) => {
+            modals::draw_org_picker(f, &state.theme, modal_area, &orgs, selected);
+        }
+        Some(Modal::TagPicker { tags, selected }) => {
+            modals::draw_tag_picker(f, &state.theme, modal_area, &tags, selected);
+        }
         Some(Modal::Filter { query }) => {
             let p = Paragraph::new(format!("/{query}"))
                 .style(state.theme.input_text_focus)

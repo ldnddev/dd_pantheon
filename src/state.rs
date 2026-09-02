@@ -3,7 +3,8 @@ use crate::config::ConfigStore;
 use crate::fixtures::{DemoData, dummy_backup_plan};
 use crate::jobs::{Job, JobHub, JobId};
 use crate::models::{
-    ActionItem, Env, InspectorTab, LayoutId, MetricsPeriod, MetricsSeries, Site, default_actions,
+    ActionItem, Env, InspectorTab, LayoutId, MetricsPeriod, MetricsSeries, OrgRef, Site,
+    default_actions,
 };
 use crate::plan::{CommandPlan, StagedPlan, ToolKind};
 use crate::theme::{Theme, ThemeStatus};
@@ -80,10 +81,35 @@ pub enum Modal {
     Filter {
         query: String,
     },
+    TagAdd {
+        value: String,
+    },
+    OrgPicker {
+        site: String,
+        orgs: Vec<OrgRef>,
+        selected: usize,
+    },
+    TagPicker {
+        tags: Vec<String>,
+        selected: usize,
+    },
     Error {
         msg: String,
     },
     QuitConfirm,
+}
+
+#[derive(Clone, Debug)]
+pub struct TagChipHit {
+    pub name: String,
+    pub body: Rect,
+    pub close: Rect,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct PeriodHit {
+    pub period: MetricsPeriod,
+    pub area: Rect,
 }
 
 #[derive(Clone, Debug)]
@@ -152,6 +178,14 @@ pub struct AppState {
     pub inflight_readonly: HashMap<String, JobId>,
     pub pending_env_list: Option<(String, Instant)>,
     pub pending_env_info: Option<(String, String, Instant)>,
+    pub pending_org_list: Option<(String, Instant)>,
+    pub pending_tag_list: Option<(String, String, Instant)>,
+    pub pending_metrics: Option<(String, String, Instant)>,
+    pub metrics_error: Option<String>,
+    pub period_hits: Vec<PeriodHit>,
+    pub org_prompted: HashSet<String>,
+    pub selected_chip: Option<String>,
+    pub tag_chips: Vec<TagChipHit>,
 
     pub tree_area: Rect,
     pub inspector_area: Rect,
@@ -217,6 +251,14 @@ impl AppState {
             inflight_readonly: HashMap::new(),
             pending_env_list: None,
             pending_env_info: None,
+            pending_org_list: None,
+            pending_tag_list: None,
+            pending_metrics: None,
+            metrics_error: None,
+            period_hits: Vec::new(),
+            org_prompted: HashSet::new(),
+            selected_chip: None,
+            tag_chips: Vec::new(),
             tree_area: Rect::default(),
             inspector_area: Rect::default(),
             preview_area: Rect::default(),
@@ -342,6 +384,8 @@ impl AppState {
             self.sync_dummy_plan();
         } else {
             crate::workflows::inventory::on_selection_changed(self);
+            crate::workflows::tags::on_selection_changed(self);
+            crate::workflows::metrics::on_selection_changed(self);
         }
         self.persist_selection();
     }

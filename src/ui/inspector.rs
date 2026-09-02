@@ -93,7 +93,8 @@ fn tab_line(state: &AppState) -> Line<'static> {
     Line::from(spans)
 }
 
-fn draw_info(f: &mut Frame, state: &AppState, area: Rect) {
+fn draw_info(f: &mut Frame, state: &mut AppState, area: Rect) {
+    state.tag_chips.clear();
     let mut lines = Vec::new();
     if !state.demo {
         match state.auth {
@@ -112,7 +113,7 @@ fn draw_info(f: &mut Frame, state: &AppState, area: Rect) {
             _ => {}
         }
     }
-    if let Some(site) = state.selected_site() {
+    if let Some(site) = state.selected_site().cloned() {
         lines.push(kv(state, "framework", site.framework.label()));
         if site.frozen {
             lines.push(kv(state, "status", "frozen"));
@@ -131,16 +132,12 @@ fn draw_info(f: &mut Frame, state: &AppState, area: Rect) {
                 state.theme.secondary,
             )));
         }
-        if site.tags.is_empty() {
+        let tags_line_idx = lines.len();
+        let tag_names: Vec<String> = site.tags.iter().map(|t| t.name.clone()).collect();
+        if tag_names.is_empty() {
             lines.push(kv(state, "tags", "—"));
         } else {
-            let tags = site
-                .tags
-                .iter()
-                .map(|t| format!("[{}]", t.name))
-                .collect::<Vec<_>>()
-                .join(" ");
-            lines.push(kv(state, "tags", &tags));
+            lines.push(tag_chips_line(state, &tag_names, area, tags_line_idx));
         }
         if let Some(plan) = &site.plan_name {
             lines.push(kv(state, "plan", plan));
@@ -227,7 +224,57 @@ fn draw_local(f: &mut Frame, state: &AppState, area: Rect) {
     f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), area);
 }
 
-fn kv<'a>(state: &'a AppState, key: &str, value: &str) -> Line<'a> {
+fn tag_chips_line(
+    state: &mut AppState,
+    tag_names: &[String],
+    area: Rect,
+    line_idx: usize,
+) -> Line<'static> {
+    let y = area.y.saturating_add(
+        line_idx
+            .saturating_sub(state.inspector_scroll as usize)
+            .min(u16::MAX as usize) as u16,
+    );
+    let mut x = area.x.saturating_add(11);
+    let mut spans = vec![Span::styled(format!("{:11}", "tags"), state.theme.label)];
+    let focused = state.focus == FocusPane::Inspector;
+    for name in tag_names {
+        if x >= area.x.saturating_add(area.width.saturating_sub(4)) {
+            spans.push(Span::styled(" …", state.theme.secondary));
+            break;
+        }
+        let selected = state.selected_chip.as_deref() == Some(name.as_str());
+        let show_close = focused && selected;
+        let label = if show_close {
+            format!("[{name} ×]")
+        } else {
+            format!("[{name}]")
+        };
+        let w = label.chars().count() as u16;
+        let style = if selected {
+            state.theme.active_label
+        } else {
+            state.theme.label
+        };
+        spans.push(Span::styled(label, style));
+        spans.push(Span::raw(" "));
+        let body = Rect::new(x, y, w, 1);
+        let close = if show_close {
+            Rect::new(x.saturating_add(w.saturating_sub(2)), y, 1, 1)
+        } else {
+            Rect::new(x, y, 0, 0)
+        };
+        state.tag_chips.push(crate::state::TagChipHit {
+            name: name.clone(),
+            body,
+            close,
+        });
+        x = x.saturating_add(w.saturating_add(1));
+    }
+    Line::from(spans)
+}
+
+fn kv(state: &AppState, key: &str, value: &str) -> Line<'static> {
     Line::from(vec![
         Span::styled(format!("{key:<11}"), state.theme.label),
         Span::raw(value.to_string()),

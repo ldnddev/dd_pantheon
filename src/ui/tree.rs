@@ -30,7 +30,7 @@ pub fn draw(f: &mut Frame, state: &mut AppState, area: Rect) {
     let tag = state
         .tag_filter
         .as_ref()
-        .map(|t| format!("  #{t}"))
+        .map(|t| format!("  tag:{t}"))
         .unwrap_or_default();
     let title = format!("Sites ({count}){filter}{tag}");
 

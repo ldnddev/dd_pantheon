@@ -113,6 +113,8 @@ impl App {
         }
         self.state.job_running = self.state.jobs.values().any(|j| j.status.is_live());
         crate::workflows::inventory::flush_debounce(&mut self.state);
+        crate::workflows::tags::flush_debounce(&mut self.state);
+        crate::workflows::metrics::flush_debounce(&mut self.state);
     }
 
     pub fn save(&mut self) -> Result<()> {
@@ -151,15 +153,17 @@ fn apply_event(state: &mut AppState, ev: JobEvent) {
             status,
             stdout_raw: _,
         } => {
-            let (kind, stdout, plan_safety, slot, expects_json, is_login) =
+            let (kind, stdout, plan_safety, slot, expects_json, is_login, is_tag_mutate) =
                 if let Some(job) = state.jobs.get(&id) {
+                    let cmd = job.plan.argv.first().map(|a| a.as_str());
                     (
                         job.kind.clone(),
                         job.stdout_raw.clone(),
                         job.plan.safety,
                         job.plan.target.mutating_slot(),
                         job.plan.expects_json,
-                        job.plan.argv.first().map(|a| a.as_str()) == Some("auth:login"),
+                        cmd == Some("auth:login"),
+                        matches!(cmd, Some("tag:add" | "tag:remove" | "tag:rm")),
                     )
                 } else {
                     return;
@@ -191,6 +195,7 @@ fn apply_event(state: &mut AppState, ev: JobEvent) {
                 state.mutating_slots.remove(&slot);
             }
             crate::workflows::inventory::clear_inflight(state, &kind);
+            crate::workflows::metrics::clear_inflight(state, &kind);
             match &status {
                 JobStatus::Succeeded { .. } => {
                     if !kind.quiet() {
@@ -206,6 +211,9 @@ fn apply_event(state: &mut AppState, ev: JobEvent) {
                                 JobKind::DoctorWhoami,
                             );
                         }
+                    }
+                    if is_tag_mutate {
+                        crate::workflows::tags::on_tag_mutate_done(state);
                     }
                     advance_workflow(state);
                 }
@@ -279,6 +287,13 @@ fn apply_inventory_result(state: &mut AppState, kind: &JobKind, stdout: &str) {
         }
         JobKind::EnvInfo { site, env } => {
             crate::workflows::inventory::apply_env_info(state, site, env, stdout)
+        }
+        JobKind::OrgList { site } => crate::workflows::tags::apply_org_list(state, site, stdout),
+        JobKind::TagList { site, org } => {
+            crate::workflows::tags::apply_tag_list(state, site, org, stdout)
+        }
+        JobKind::Metrics { site, env, period } => {
+            crate::workflows::metrics::apply_metrics(state, site, env, period, stdout)
         }
         _ => {}
     }

@@ -1,3 +1,4 @@
+use crate::models::OrgRef;
 use crate::plan::CommandPlan;
 use crate::state::AppState;
 use crate::theme::Theme;
@@ -141,4 +142,78 @@ pub fn draw_livegate(
             ),
     );
     f.render_widget(input, chunks[1]);
+}
+
+pub fn draw_tag_add(f: &mut Frame, theme: &Theme, area: Rect, value: &str) {
+    let p = Paragraph::new(format!("tag: {value}"))
+        .style(theme.input_text_focus)
+        .block(
+            Block::default()
+                .title("Add tag")
+                .borders(Borders::ALL)
+                .border_style(theme.input_border_focus)
+                .style(theme.modal),
+        );
+    f.render_widget(p, area);
+}
+
+pub fn draw_org_picker(f: &mut Frame, theme: &Theme, area: Rect, orgs: &[OrgRef], selected: usize) {
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "Pick organization for tags",
+            theme.modal_header.add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+    ];
+    for (i, org) in orgs.iter().enumerate() {
+        let marker = if i == selected { "> " } else { "  " };
+        let style = if i == selected {
+            theme.active_label
+        } else {
+            theme.modal_text
+        };
+        lines.push(Line::from(Span::styled(
+            format!("{marker}{}  ({})", org.org_name, org.org_id),
+            style,
+        )));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from("Enter pick   Esc cancel"));
+    let p = Paragraph::new(lines).wrap(Wrap { trim: false }).block(
+        Block::default()
+            .title("Organization")
+            .borders(Borders::ALL)
+            .border_style(theme.active_border)
+            .style(theme.modal),
+    );
+    f.render_widget(p, area);
+}
+
+pub fn draw_tag_picker(f: &mut Frame, theme: &Theme, area: Rect, tags: &[String], selected: usize) {
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "Filter tree by tag",
+            theme.modal_header.add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+    ];
+    for (i, tag) in tags.iter().enumerate() {
+        let marker = if i == selected { "> " } else { "  " };
+        let style = if i == selected {
+            theme.active_label
+        } else {
+            theme.modal_text
+        };
+        lines.push(Line::from(Span::styled(format!("{marker}{tag}"), style)));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from("Enter pin   Esc cancel   T again clears"));
+    let p = Paragraph::new(lines).wrap(Wrap { trim: false }).block(
+        Block::default()
+            .title("Tags")
+            .borders(Borders::ALL)
+            .border_style(theme.active_border)
+            .style(theme.modal),
+    );
+    f.render_widget(p, area);
 }

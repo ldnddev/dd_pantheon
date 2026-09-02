@@ -1,5 +1,7 @@
 pub mod auth;
 pub mod inventory;
+pub mod metrics;
+pub mod tags;
 
 use crate::jobs::{self, JobKind};
 use crate::plan::{PlanTarget, SafetyTier, StagedPlan};
@@ -19,7 +21,7 @@ pub fn stage_action(state: &mut AppState, action_id: &str) {
             state.show_toast(ToastLevel::Info, "CMS form lands in PR 13");
         }
         "n" => state.show_toast(ToastLevel::Info, "site create lands in PR 10"),
-        "a" => state.show_toast(ToastLevel::Info, "tags land in PR 5"),
+        "a" => tags::open_add(state),
         "r" => inventory::refresh(state),
         other => state.show_toast(ToastLevel::Warning, format!("unknown action: {other}")),
     }

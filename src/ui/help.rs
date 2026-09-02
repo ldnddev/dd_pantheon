@@ -25,7 +25,10 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect, scroll: u16) {
     lines.push(line("Enter", "Expand site / keep env selected"));
     lines.push(line("r", "Refresh inventory (live)"));
     lines.push(line("/", "Filter"));
-    lines.push(line("T", "Pin first tag as filter"));
+    lines.push(line("T", "Tag filter picker (again clears)"));
+    lines.push(line("a", "Add tag"));
+    lines.push(line("x", "Remove selected tag chip (inspector)"));
+    lines.push(line("[ / ]", "Cycle tag chips (inspector)"));
 
     push_header(&mut lines, state, "Inspector");
     lines.push(line("j/k", "Move Actions / scroll"));
