@@ -1,0 +1,144 @@
+use crate::plan::CommandPlan;
+use crate::state::AppState;
+use crate::theme::Theme;
+use ratatui::Frame;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+
+pub fn draw_login(
+    f: &mut Frame,
+    theme: &Theme,
+    area: Rect,
+    token: &str,
+    use_env_token: bool,
+    env_available: bool,
+) {
+    let masked: String = if use_env_token && env_available {
+        "(env TERMINUS_MACHINE_TOKEN)".into()
+    } else {
+        "•".repeat(token.chars().count())
+    };
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "Login",
+            theme.modal_header.add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from("Machine token (never written to config)."),
+        Line::from(Span::styled(
+            "token visible in ps until login exits",
+            theme.warning_style,
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("token  ", theme.modal_label),
+            Span::styled(masked, theme.input_text_focus),
+        ]),
+    ];
+    if env_available {
+        let mark = if use_env_token { "[x]" } else { "[ ]" };
+        lines.push(Line::from(format!(
+            "{mark} use env token  (Space to toggle)"
+        )));
+        lines.push(Line::from(Span::styled("env token detected", theme.info)));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from("Enter login   Esc cancel"));
+    let p = Paragraph::new(lines).wrap(Wrap { trim: false }).block(
+        Block::default()
+            .title("Login")
+            .borders(Borders::ALL)
+            .border_style(theme.input_border_focus)
+            .style(theme.modal),
+    );
+    f.render_widget(p, area);
+}
+
+pub fn draw_destructive(f: &mut Frame, state: &AppState, area: Rect, plan: &CommandPlan) {
+    let theme = &state.theme;
+    let lines = vec![
+        Line::from(Span::styled(
+            format!(
+                "DESTRUCTIVE — {}",
+                plan.argv.first().cloned().unwrap_or_default()
+            ),
+            theme.modal_header.add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(plan.redacted_shell_line(), theme.modal_text)),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("target  ", theme.modal_label),
+            Span::raw(plan.target.label()),
+        ]),
+        Line::from(vec![
+            Span::styled("why     ", theme.modal_label),
+            Span::raw(plan.why.clone()),
+        ]),
+        Line::from(""),
+        Line::from("Enter/y confirm   Esc cancel"),
+    ];
+    let p = Paragraph::new(lines).wrap(Wrap { trim: false }).block(
+        Block::default()
+            .title("Confirm")
+            .borders(Borders::ALL)
+            .border_style(theme.error)
+            .style(theme.modal),
+    );
+    f.render_widget(p, area);
+}
+
+pub fn draw_livegate(
+    f: &mut Frame,
+    theme: &Theme,
+    area: Rect,
+    plan: &CommandPlan,
+    expected: &str,
+    typed: &str,
+) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(6), Constraint::Length(3)])
+        .split(area);
+    let lines = vec![
+        Line::from(Span::styled(
+            format!("LIVEGATE — type: {expected}"),
+            theme.modal_header.add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(plan.redacted_shell_line()),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("target  ", theme.modal_label),
+            Span::raw(plan.target.label()),
+        ]),
+        Line::from(vec![
+            Span::styled("why     ", theme.modal_label),
+            Span::raw(plan.why.clone()),
+        ]),
+        Line::from(""),
+        Line::from("Esc cancel. y is a character, not confirm."),
+    ];
+    let p = Paragraph::new(lines).wrap(Wrap { trim: false }).block(
+        Block::default()
+            .title("LiveGate")
+            .borders(Borders::ALL)
+            .border_style(theme.error)
+            .style(theme.modal),
+    );
+    f.render_widget(p, chunks[0]);
+    let input = Paragraph::new(typed).block(
+        Block::default()
+            .title("type gate word")
+            .borders(Borders::ALL)
+            .border_style(theme.input_border_focus)
+            .style(
+                Style::default()
+                    .fg(theme.colors.input_text_focus)
+                    .bg(theme.colors.modal_background),
+            ),
+    );
+    f.render_widget(input, chunks[1]);
+}
