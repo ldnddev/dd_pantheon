@@ -23,7 +23,7 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect, scroll: u16) {
     lines.push(line("h/l", "Expand / collapse"));
     lines.push(line("g / G", "Top / bottom"));
     lines.push(line("Enter", "Expand site / keep env selected"));
-    lines.push(line("r", "Refresh inventory (live)"));
+    lines.push(line("r", "Refresh inventory + metrics (live)"));
     lines.push(line("/", "Filter"));
     lines.push(line("T", "Tag filter picker (again clears)"));
     lines.push(line("a", "Add tag"));
@@ -34,7 +34,10 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect, scroll: u16) {
     lines.push(line("j/k", "Move Actions / scroll"));
     lines.push(line("Enter", "Stage action (demo: no spawn)"));
     lines.push(line("1-4", "C tabs: Info Metrics Local Actions"));
-    lines.push(line("d / w / Shift+M", "Metrics period (PR 6)"));
+    lines.push(line(
+        "d / w / Shift+M",
+        "Metrics period (env row; m is CMS)",
+    ));
     lines.push(line("m", "CMS form (PR 13) — never month"));
 
     push_header(&mut lines, state, "Preview / log");
@@ -46,7 +49,10 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect, scroll: u16) {
     lines.push(line("j/k", "Scroll"));
 
     push_header(&mut lines, state, "Mouse");
-    lines.push(line("click", "Focus pane / select tree row"));
+    lines.push(line(
+        "click",
+        "Focus pane / select tree row / period labels",
+    ));
     lines.push(line("wheel", "Scroll hovered pane"));
 
     push_header(&mut lines, state, "Layouts");

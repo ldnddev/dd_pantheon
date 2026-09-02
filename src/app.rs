@@ -218,16 +218,29 @@ fn apply_event(state: &mut AppState, ev: JobEvent) {
                     advance_workflow(state);
                 }
                 JobStatus::Failed { err, exit } => {
-                    state.show_toast(ToastLevel::Error, format!("job failed: {err}"));
-                    if matches!(kind, JobKind::DoctorWhoami) {
-                        apply_doctor_result(state, &kind, &stdout, exit.unwrap_or(1), "");
+                    if let JobKind::Metrics { .. } = &kind {
+                        state.metrics_error = Some(err.clone());
+                    } else if kind.quiet() {
+                        if matches!(kind, JobKind::DoctorWhoami) {
+                            apply_doctor_result(state, &kind, &stdout, exit.unwrap_or(1), "");
+                        }
+                    } else {
+                        state.show_toast(ToastLevel::Error, format!("job failed: {err}"));
                     }
                 }
                 JobStatus::Cancelled => {
-                    state.show_toast(ToastLevel::Warning, "job cancelled");
+                    if matches!(kind, JobKind::Metrics { .. }) {
+                        state.metrics_error = Some("metrics cancelled".into());
+                    } else {
+                        state.show_toast(ToastLevel::Warning, "job cancelled");
+                    }
                 }
                 JobStatus::TimedOut => {
-                    state.show_toast(ToastLevel::Error, "job timed out");
+                    if matches!(kind, JobKind::Metrics { .. }) {
+                        state.metrics_error = Some("metrics timed out".into());
+                    } else {
+                        state.show_toast(ToastLevel::Error, "job timed out");
+                    }
                 }
                 _ => {}
             }

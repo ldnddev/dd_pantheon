@@ -58,6 +58,10 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
         return handle_modal(state, key, modal);
     }
 
+    if apply_metrics_period_key(state, key) {
+        return Ok(false);
+    }
+
     match key.code {
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             crate::workflows::cancel_jobs(state);
@@ -485,6 +489,26 @@ fn handle_log(state: &mut AppState, key: KeyEvent) -> Result<bool> {
     Ok(false)
 }
 
+fn apply_metrics_period_key(state: &mut AppState, key: KeyEvent) -> bool {
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        return false;
+    }
+    let period = match key.code {
+        KeyCode::Char('d') => Some(crate::models::MetricsPeriod::Day),
+        KeyCode::Char('w') => Some(crate::models::MetricsPeriod::Week),
+        KeyCode::Char('M') => Some(crate::models::MetricsPeriod::Month),
+        KeyCode::Char('m') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            Some(crate::models::MetricsPeriod::Month)
+        }
+        _ => None,
+    };
+    let Some(period) = period else {
+        return false;
+    };
+    crate::workflows::metrics::set_period(state, period);
+    true
+}
+
 fn shared_action_keys(state: &mut AppState, code: KeyCode) {
     let id = match code {
         KeyCode::Char('b') => "backup",
@@ -499,7 +523,7 @@ fn shared_action_keys(state: &mut AppState, code: KeyCode) {
         _ => return,
     };
     crate::workflows::stage_action(state, id);
-    if !matches!(id, "r" | "n" | "m" | "a") {
+    if !matches!(id, "r" | "n" | "m" | "a" | "cms") {
         crate::workflows::request_run(state);
     }
 }
@@ -537,6 +561,11 @@ pub fn handle_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
                 }
             } else if contains(state.inspector_area, x, y) {
                 state.focus = FocusPane::Inspector;
+                let periods = state.period_hits.clone();
+                if let Some(hit) = periods.iter().find(|h| contains(h.area, x, y)) {
+                    crate::workflows::metrics::set_period(state, hit.period);
+                    return Ok(false);
+                }
                 let chips = state.tag_chips.clone();
                 if let Some(chip) = chips
                     .iter()

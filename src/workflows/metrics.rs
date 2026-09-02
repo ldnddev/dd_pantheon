@@ -1,7 +1,5 @@
 use crate::jobs::JobKind;
-use crate::models::{
-    METRICS_STALE, MetricsPeriod, MetricsPoint, MetricsSeries,
-};
+use crate::models::{METRICS_STALE, MetricsPeriod, MetricsPoint, MetricsSeries};
 use crate::plan::{CommandPlan, PlanTarget, SafetyTier, StagedPlan, ToolKind};
 use crate::state::{AppState, AuthState, TreeSel};
 use crate::workflows::start_job;
@@ -103,7 +101,10 @@ fn point_from_value(v: &Value) -> Option<MetricsPoint> {
     let obj = v.as_object()?;
     let visits = json_u64(obj.get("visits"));
     let pages = json_u64(obj.get("pages_served").or_else(|| obj.get("pages")));
-    if visits == 0 && pages == 0 && obj.get("cache_hit_ratio").is_none() && obj.get("datetime").is_none()
+    if visits == 0
+        && pages == 0
+        && obj.get("cache_hit_ratio").is_none()
+        && obj.get("datetime").is_none()
     {
         return None;
     }
@@ -165,7 +166,10 @@ fn derived_ratio(hits: u64, misses: u64, pages: u64) -> f64 {
 
 fn json_u64(v: Option<&Value>) -> u64 {
     match v {
-        Some(Value::Number(n)) => n.as_u64().or_else(|| n.as_f64().map(|f| f as u64)).unwrap_or(0),
+        Some(Value::Number(n)) => n
+            .as_u64()
+            .or_else(|| n.as_f64().map(|f| f as u64))
+            .unwrap_or(0),
         Some(Value::String(s)) => s.replace(',', "").parse().unwrap_or(0),
         _ => 0,
     }
@@ -197,6 +201,11 @@ pub fn on_selection_changed(state: &mut AppState) {
     }
     match &state.selected {
         TreeSel::Env { site, env } => {
+            let frozen = state.site(site).is_some_and(|s| s.frozen);
+            if frozen {
+                state.pending_metrics = None;
+                return;
+            }
             state.pending_metrics = Some((site.clone(), env.clone(), Instant::now()));
         }
         _ => {
@@ -222,6 +231,9 @@ pub fn request(state: &mut AppState, site: &str, env: &str, force: bool) {
         return;
     }
     if !matches!(state.auth, AuthState::LoggedIn { .. }) {
+        return;
+    }
+    if state.site(site).is_some_and(|s| s.frozen) {
         return;
     }
     let period = state.metrics_period;
@@ -299,17 +311,14 @@ pub fn set_period(state: &mut AppState, period: MetricsPeriod) {
 }
 
 fn seed_demo_period(state: &mut AppState, period: MetricsPeriod) {
-    let Some(env) = state.selected_env() else {
+    let Some((site, env_id)) = state.selected_env().map(|e| (e.site.clone(), e.id.clone())) else {
         return;
     };
-    let key = cache_key(&env.site, &env.id, period);
+    let key = cache_key(&site, &env_id, period);
     if state.metrics.contains_key(&key) {
         return;
     }
-    let target = PlanTarget::Env {
-        site: env.site.clone(),
-        env: env.id.clone(),
-    };
+    let target = PlanTarget::Env { site, env: env_id };
     state
         .metrics
         .insert(key, crate::fixtures::walking_metrics(target, period));
@@ -362,12 +371,7 @@ mod tests {
           "2026-08-01": {"visits":5,"pages_served":10,"cache_hit_ratio":90},
           "2026-08-02": {"visits":6,"pages_served":12,"cache_hits":9,"cache_misses":3}
         }"#;
-        let series = parse_metrics(
-            json,
-            PlanTarget::None,
-            MetricsPeriod::Week,
-        )
-        .unwrap();
+        let series = parse_metrics(json, PlanTarget::None, MetricsPeriod::Week).unwrap();
         assert_eq!(series.points.len(), 2);
         assert!((series.points[0].cache_hit_ratio - 0.9).abs() < 1e-6);
         assert!((series.points[1].cache_hit_ratio - 0.75).abs() < 1e-6);
@@ -380,11 +384,30 @@ mod tests {
     }
 
     #[test]
+    fn parses_root_array() {
+        let json = r#"[
+          {"datetime":"2026-08-01","visits":1,"pages_served":2,"cache_hit_ratio":0.5}
+        ]"#;
+        let series = parse_metrics(json, PlanTarget::None, MetricsPeriod::Day).unwrap();
+        assert_eq!(series.points.len(), 1);
+        assert!((series.points[0].cache_hit_ratio - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
     fn plan_is_env_row_only() {
-        let plan = plan_metrics(PathBuf::from("terminus"), "acme-wp", "test", MetricsPeriod::Day);
+        let plan = plan_metrics(
+            PathBuf::from("terminus"),
+            "acme-wp",
+            "test",
+            MetricsPeriod::Day,
+        );
         assert_eq!(plan.argv[0], "env:metrics");
         assert_eq!(plan.argv[1], "acme-wp.test");
         assert!(plan.argv.iter().any(|a| a == "--period=day"));
+        assert!(plan.argv.iter().any(|a| a == "--datapoints=auto"));
+        assert!(plan.argv.iter().any(|a| a == "--format=json"));
         assert!(!plan.argv[1].eq("acme-wp"));
+        assert!(plan.expects_json);
+        assert_eq!(plan.safety, SafetyTier::ReadOnly);
     }
 }

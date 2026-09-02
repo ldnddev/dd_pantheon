@@ -1,17 +1,18 @@
-use crate::models::{CacheLevel, cache_ratio_level};
-use crate::state::AppState;
+use crate::models::{CacheLevel, MetricsPeriod, cache_ratio_level};
+use crate::state::{AppState, AuthState, PeriodHit};
 use crate::theme::Theme;
+use crate::workflows::metrics::metrics_inflight;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Gauge, Paragraph, Sparkline};
 
-pub fn draw(f: &mut Frame, state: &AppState, area: Rect, bordered: bool) {
+pub fn draw(f: &mut Frame, state: &mut AppState, area: Rect, bordered: bool) {
+    state.period_hits.clear();
     let theme = &state.theme;
     let inner = if bordered {
         let block = Block::default()
-            .title("metrics  [d] w M")
             .borders(Borders::ALL)
             .border_style(theme.border)
             .style(theme.body);
@@ -21,18 +22,87 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect, bordered: bool) {
     } else {
         area
     };
+    if inner.height == 0 || inner.width == 0 {
+        return;
+    }
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(0)])
+        .split(inner);
+    draw_period_bar(f, state, chunks[0]);
+    draw_body(f, state, chunks[1]);
+}
+
+fn draw_period_bar(f: &mut Frame, state: &mut AppState, area: Rect) {
+    let mut spans = vec![Span::styled("metrics  ", state.theme.secondary)];
+    let mut x = area.x + 9;
+    for (i, period) in [
+        MetricsPeriod::Day,
+        MetricsPeriod::Week,
+        MetricsPeriod::Month,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if i > 0 {
+            spans.push(Span::raw(" "));
+            x = x.saturating_add(1);
+        }
+        let active = state.metrics_period == period;
+        let label = if active {
+            format!("[{}]", period.key_label())
+        } else {
+            format!(" {} ", period.key_label())
+        };
+        let w = label.chars().count() as u16;
+        let style = if active {
+            state.theme.active_label.add_modifier(Modifier::BOLD)
+        } else {
+            state.theme.secondary
+        };
+        spans.push(Span::styled(label, style));
+        state.period_hits.push(PeriodHit {
+            period,
+            area: Rect::new(x, area.y, w, 1),
+        });
+        x = x.saturating_add(w);
+    }
+    spans.push(Span::styled("  lagged · not APM", state.theme.secondary));
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+fn draw_body(f: &mut Frame, state: &AppState, area: Rect) {
+    let theme = &state.theme;
+    if let Some(msg) = empty_message(state) {
+        f.render_widget(Paragraph::new(msg).style(theme.secondary), area);
+        return;
+    }
+
+    if let Some(err) = error_message(state) {
+        f.render_widget(Paragraph::new(err).style(theme.error), area);
+        return;
+    }
 
     let Some(series) = state.selected_metrics() else {
-        let msg = if state.selected_env().is_none() {
-            "select an environment"
+        let msg = if metrics_inflight(state) {
+            "loading metrics…"
         } else {
-            "no metrics for this env"
+            "No metrics yet for this env"
         };
-        f.render_widget(Paragraph::new(msg).style(theme.secondary), inner);
+        f.render_widget(Paragraph::new(msg).style(theme.secondary), area);
         return;
     };
 
-    if inner.height < 3 {
+    if series.points.is_empty() {
+        f.render_widget(
+            Paragraph::new("No metrics yet for this env").style(theme.secondary),
+            area,
+        );
+        return;
+    }
+
+    if area.height < 3 {
         let last = series
             .points
             .last()
@@ -40,7 +110,7 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect, bordered: bool) {
             .unwrap_or(0.0);
         f.render_widget(
             Paragraph::new(format!("cache {:.0}%", last * 100.0)).style(ratio_style(theme, last)),
-            inner,
+            area,
         );
         return;
     }
@@ -50,30 +120,19 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect, bordered: bool) {
     let last = series.points.last();
     let ratio = last.map(|p| p.cache_hit_ratio).unwrap_or(0.0);
 
+    let table_h = area.height.saturating_sub(4).min(8);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Length(1),
-            Constraint::Min(1),
+            Constraint::Min(table_h.max(1)),
         ])
-        .split(inner);
+        .split(area);
 
-    f.render_widget(
-        Sparkline::default()
-            .data(&visits)
-            .style(theme.info)
-            .max(visits.iter().copied().max().unwrap_or(1)),
-        chunks[0],
-    );
-    f.render_widget(
-        Sparkline::default()
-            .data(&pages)
-            .style(theme.label)
-            .max(pages.iter().copied().max().unwrap_or(1)),
-        chunks[1],
-    );
+    draw_spark_row(f, chunks[0], "visits", &visits, theme.info, theme);
+    draw_spark_row(f, chunks[1], "pages", &pages, theme.active_label, theme);
 
     let gauge = Gauge::default()
         .ratio(ratio.clamp(0.0, 1.0))
@@ -81,13 +140,68 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect, bordered: bool) {
         .gauge_style(ratio_style(theme, ratio));
     f.render_widget(gauge, chunks[2]);
 
-    if let Some(p) = last {
-        let line = Line::from(vec![Span::styled(
-            format!("{}  {}v  {}p", p.datetime, p.visits, p.pages_served),
+    let n = series.points.len().min(14);
+    let start = series.points.len().saturating_sub(n);
+    let mut lines = Vec::new();
+    for p in series.points[start..].iter().rev() {
+        lines.push(Line::from(Span::styled(
+            format!(
+                "{}  {:>5}v  {:>5}p  {:>3.0}%",
+                p.datetime,
+                p.visits,
+                p.pages_served,
+                p.cache_hit_ratio * 100.0
+            ),
             theme.secondary,
-        )]);
-        f.render_widget(Paragraph::new(line), chunks[3]);
+        )));
     }
+    f.render_widget(Paragraph::new(lines), chunks[3]);
+}
+
+fn draw_spark_row(
+    f: &mut Frame,
+    area: Rect,
+    label: &str,
+    data: &[u64],
+    style: Style,
+    theme: &Theme,
+) {
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(7), Constraint::Min(1)])
+        .split(area);
+    f.render_widget(Paragraph::new(label).style(theme.secondary), chunks[0]);
+    if chunks[1].width == 0 {
+        return;
+    }
+    f.render_widget(
+        Sparkline::default()
+            .data(data)
+            .style(style)
+            .max(data.iter().copied().max().unwrap_or(1)),
+        chunks[1],
+    );
+}
+
+fn empty_message(state: &AppState) -> Option<&'static str> {
+    if !state.demo {
+        if !state.tools_enabled {
+            return Some("terminus not on PATH");
+        }
+        match state.auth {
+            AuthState::LoggedOut | AuthState::Unknown => {
+                return Some("Not logged in — open login from F3");
+            }
+            AuthState::LoggedIn { .. } => {}
+        }
+    }
+    if state.selected_site().is_some_and(|s| s.frozen) {
+        return Some("Site frozen — metrics unavailable");
+    }
+    if state.selected_env().is_none() {
+        return Some("select an environment");
+    }
+    None
 }
 
 fn ratio_style(theme: &Theme, ratio: f64) -> Style {
@@ -96,4 +210,14 @@ fn ratio_style(theme: &Theme, ratio: f64) -> Style {
         CacheLevel::Warn => theme.warning_style,
         CacheLevel::Bad => theme.error,
     }
+}
+
+fn error_message(state: &AppState) -> Option<String> {
+    if state.selected_metrics().is_some() {
+        return None;
+    }
+    if let Some(err) = &state.metrics_error {
+        return Some(format!("{err}  · r to retry"));
+    }
+    None
 }

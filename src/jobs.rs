@@ -34,15 +34,30 @@ pub enum Stream {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum JobKind {
     User,
-    Workflow { step: usize, total: usize },
-    DoctorVersion { tool: ToolKind },
+    Workflow {
+        step: usize,
+        total: usize,
+    },
+    DoctorVersion {
+        tool: ToolKind,
+    },
     DoctorList,
     DoctorWhoami,
     SiteList,
-    EnvList { site: String },
-    EnvInfo { site: String, env: String },
-    OrgList { site: String },
-    TagList { site: String, org: String },
+    EnvList {
+        site: String,
+    },
+    EnvInfo {
+        site: String,
+        env: String,
+    },
+    OrgList {
+        site: String,
+    },
+    TagList {
+        site: String,
+        org: String,
+    },
     Metrics {
         site: String,
         env: String,
