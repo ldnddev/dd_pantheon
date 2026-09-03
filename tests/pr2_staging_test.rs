@@ -49,6 +49,7 @@ fn deploy_test_is_backup_first_workflow() {
     fs::create_dir_all(&root).expect("root");
     let mut app = App::new_demo_in(&root, &root).expect("app");
     app.handle_key(key(KeyCode::Char('e'))).unwrap();
+    app.handle_key(key(KeyCode::Enter)).unwrap();
     match app.state.current.as_ref() {
         Some(StagedPlan::Workflow { plan, .. }) => {
             assert!(plan.steps.len() >= 3);

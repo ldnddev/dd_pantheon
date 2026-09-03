@@ -578,6 +578,67 @@ pub fn draw_clone_content(
     f.render_widget(p, area);
 }
 
+pub fn draw_deploy_note(
+    f: &mut Frame,
+    theme: &Theme,
+    area: Rect,
+    env: &str,
+    note: &str,
+    sync_content: bool,
+    updatedb: bool,
+    focus: u8,
+) {
+    let mark = |on: bool| if on { "[x]" } else { "[ ]" };
+    let mut lines = vec![
+        Line::from(Span::styled(
+            format!("Deploy to {env}"),
+            theme.modal_header.add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        field(theme, focus == 0, "note", note),
+    ];
+    if env == "test" {
+        lines.push(Line::from(Span::styled(
+            format!(
+                "{} {} --sync-content  (Space; backup-first)",
+                if focus == 1 { ">" } else { " " },
+                mark(sync_content)
+            ),
+            if focus == 1 {
+                theme.input_text_focus
+            } else {
+                theme.modal_text
+            },
+        )));
+    }
+    let ud_focus = if env == "test" { 2 } else { 1 };
+    lines.push(Line::from(Span::styled(
+        format!(
+            "{} {} --updatedb     (Space; Drupal)",
+            if focus == ud_focus { ">" } else { " " },
+            mark(updatedb)
+        ),
+        if focus == ud_focus {
+            theme.input_text_focus
+        } else {
+            theme.modal_text
+        },
+    )));
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Tab fields  Enter deploy  Esc cancel",
+        theme.secondary,
+    )));
+    let p = Paragraph::new(lines).wrap(Wrap { trim: false }).block(
+        Block::default()
+            .title("env:deploy")
+            .borders(Borders::ALL)
+            .border_style(theme.input_border_focus)
+            .style(theme.modal),
+    );
+    f.render_widget(p, area);
+}
+
 pub fn draw_backup_pick(
     f: &mut Frame,
     theme: &Theme,

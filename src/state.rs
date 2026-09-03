@@ -158,6 +158,14 @@ pub enum Modal {
         selected: usize,
         kind: BackupPickKind,
     },
+    DeployNote {
+        site: String,
+        env: String,
+        note: String,
+        sync_content: bool,
+        updatedb: bool,
+        focus: u8,
+    },
     Error {
         msg: String,
     },

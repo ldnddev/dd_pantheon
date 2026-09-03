@@ -33,7 +33,7 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect, scroll: u16) {
     ));
     lines.push(line(
         "e",
-        "Deploy: git-mode on dev, backup-first test, LiveGate live",
+        "Deploy: git-mode on dev; test/live open a --note form (sync-content on test)",
     ));
     lines.push(line(
         "c",

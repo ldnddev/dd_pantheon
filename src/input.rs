@@ -35,7 +35,8 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
                 | Modal::HttpsSet { .. }
                 | Modal::LockEnable { .. }
                 | Modal::Palette { .. }
-                | Modal::Cms { .. },
+                | Modal::Cms { .. }
+                | Modal::DeployNote { .. },
         )
     );
 
@@ -786,6 +787,104 @@ fn handle_modal(state: &mut AppState, key: KeyEvent, modal: Modal) -> Result<boo
                 });
             }
         },
+        Modal::DeployNote {
+            site,
+            env,
+            mut note,
+            mut sync_content,
+            mut updatedb,
+            mut focus,
+        } => {
+            let max_focus = if env == "test" { 2 } else { 1 };
+            match key.code {
+                KeyCode::Esc => state.modal = None,
+                KeyCode::Enter => {
+                    crate::workflows::deploy::submit_note(
+                        state,
+                        site,
+                        env,
+                        note,
+                        sync_content,
+                        updatedb,
+                    );
+                }
+                KeyCode::Tab => {
+                    focus = if key.modifiers.contains(KeyModifiers::SHIFT) {
+                        (focus + max_focus) % (max_focus + 1)
+                    } else {
+                        (focus + 1) % (max_focus + 1)
+                    };
+                    state.modal = Some(Modal::DeployNote {
+                        site,
+                        env,
+                        note,
+                        sync_content,
+                        updatedb,
+                        focus,
+                    });
+                }
+                KeyCode::BackTab => {
+                    focus = (focus + max_focus) % (max_focus + 1);
+                    state.modal = Some(Modal::DeployNote {
+                        site,
+                        env,
+                        note,
+                        sync_content,
+                        updatedb,
+                        focus,
+                    });
+                }
+                KeyCode::Char(' ') if focus > 0 => {
+                    if env == "test" && focus == 1 {
+                        sync_content = !sync_content;
+                    } else {
+                        updatedb = !updatedb;
+                    }
+                    state.modal = Some(Modal::DeployNote {
+                        site,
+                        env,
+                        note,
+                        sync_content,
+                        updatedb,
+                        focus,
+                    });
+                }
+                KeyCode::Backspace if focus == 0 => {
+                    note.pop();
+                    state.modal = Some(Modal::DeployNote {
+                        site,
+                        env,
+                        note,
+                        sync_content,
+                        updatedb,
+                        focus,
+                    });
+                }
+                KeyCode::Char(c)
+                    if focus == 0 && !key.modifiers.contains(KeyModifiers::CONTROL) =>
+                {
+                    note.push(c);
+                    state.modal = Some(Modal::DeployNote {
+                        site,
+                        env,
+                        note,
+                        sync_content,
+                        updatedb,
+                        focus,
+                    });
+                }
+                _ => {
+                    state.modal = Some(Modal::DeployNote {
+                        site,
+                        env,
+                        note,
+                        sync_content,
+                        updatedb,
+                        focus,
+                    });
+                }
+            }
+        }
         Modal::BackupPick {
             site,
             env,

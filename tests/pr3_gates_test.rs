@@ -29,6 +29,7 @@ fn app_not_demo() -> (App, PathBuf) {
 fn deploy_test_opens_destructive_modal() {
     let (mut app, root) = app_not_demo();
     app.handle_key(key(KeyCode::Char('e'))).unwrap();
+    app.handle_key(key(KeyCode::Enter)).unwrap();
     assert!(
         matches!(app.state.modal, Some(Modal::ConfirmDestructive { .. })),
         "{:?}",
@@ -45,6 +46,7 @@ fn deploy_live_opens_livegate_modal() {
         env: "live".into(),
     };
     app.handle_key(key(KeyCode::Char('e'))).unwrap();
+    app.handle_key(key(KeyCode::Enter)).unwrap();
     match app.state.modal {
         Some(Modal::LiveGate { ref expected, .. }) => assert_eq!(expected, "live"),
         other => panic!("expected LiveGate, got {other:?}"),
@@ -58,7 +60,16 @@ fn demo_still_does_not_open_spawn_modals() {
     fs::create_dir_all(&root).expect("root");
     let mut app = App::new_demo_in(&root, &root).expect("app");
     app.handle_key(key(KeyCode::Char('e'))).unwrap();
-    assert!(app.state.modal.is_none());
+    assert!(matches!(app.state.modal, Some(Modal::DeployNote { .. })));
+    app.handle_key(key(KeyCode::Enter)).unwrap();
+    assert!(
+        !matches!(
+            app.state.modal,
+            Some(Modal::ConfirmDestructive { .. }) | Some(Modal::LiveGate { .. })
+        ),
+        "{:?}",
+        app.state.modal
+    );
     let toast = app.state.toast.as_ref().expect("toast");
     assert!(toast.message.contains("demo: no spawn"));
     let _ = fs::remove_dir_all(root);

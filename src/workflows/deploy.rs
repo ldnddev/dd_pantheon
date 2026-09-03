@@ -236,53 +236,103 @@ pub fn stage_deploy(state: &mut AppState) -> bool {
         return false;
     };
     match env.as_str() {
-        "test" => stage_test(state, &site, &env),
-        "live" => stage_live(state, &site, &env),
+        "test" | "live" => {
+            open_note(state, site, env);
+            false
+        }
         _ => stage_code(state, &site, &env),
     }
 }
 
-fn stage_test(state: &mut AppState, site: &str, env: &str) -> bool {
-    let updatedb = wants_updatedb(state, site);
+fn open_note(state: &mut AppState, site: String, env: String) {
+    let updatedb = wants_updatedb(state, &site);
+    state.modal = Some(Modal::DeployNote {
+        sync_content: env == "test",
+        updatedb,
+        site,
+        env,
+        note: DEFAULT_NOTE.to_string(),
+        focus: 0,
+    });
+}
+
+pub fn submit_note(
+    state: &mut AppState,
+    site: String,
+    env: String,
+    note: String,
+    sync_content: bool,
+    updatedb: bool,
+) {
+    let note = {
+        let t = note.trim();
+        if t.is_empty() {
+            DEFAULT_NOTE.to_string()
+        } else {
+            t.to_string()
+        }
+    };
+    state.modal = None;
+    let ok = if env == "test" {
+        stage_test(state, &site, &env, &note, sync_content, updatedb)
+    } else {
+        stage_live(state, &site, &env, &note, updatedb)
+    };
+    if ok {
+        crate::workflows::request_run(state);
+    }
+}
+
+fn stage_test(
+    state: &mut AppState,
+    site: &str,
+    env: &str,
+    note: &str,
+    sync_content: bool,
+    updatedb: bool,
+) -> bool {
     let target = PlanTarget::Env {
         site: site.to_string(),
         env: env.to_string(),
     };
-    let mut steps = crate::safety::backup_first(state.tools.terminus_path(), &target);
     let deploy = plan_deploy(
         state.tools.terminus_path(),
         site,
         env,
-        DEFAULT_NOTE,
-        true,
+        note,
+        sync_content,
         updatedb,
     );
-    steps.push(deploy);
-    let safety = steps
-        .iter()
-        .map(|s| s.safety)
-        .max()
-        .unwrap_or(SafetyTier::Destructive);
-    state.current = Some(StagedPlan::Workflow {
-        plan: WorkflowPlan {
-            title: format!("deploy {site}.{env}"),
-            why: format!("backup-first deploy to {site}.{env}"),
-            safety,
-            steps,
-            stop_on_failure: true,
-        },
-        step: 0,
-    });
+    if sync_content {
+        let mut steps = crate::safety::backup_first(state.tools.terminus_path(), &target);
+        steps.push(deploy);
+        let safety = steps
+            .iter()
+            .map(|s| s.safety)
+            .max()
+            .unwrap_or(SafetyTier::Destructive);
+        state.current = Some(StagedPlan::Workflow {
+            plan: WorkflowPlan {
+                title: format!("deploy {site}.{env}"),
+                why: format!("backup-first deploy to {site}.{env}"),
+                safety,
+                steps,
+                stop_on_failure: true,
+            },
+            step: 0,
+        });
+    } else {
+        state.current = Some(StagedPlan::One(deploy));
+    }
     true
 }
 
-fn stage_live(state: &mut AppState, site: &str, env: &str) -> bool {
-    let updatedb = wants_updatedb(state, site);
+fn stage_live(state: &mut AppState, site: &str, env: &str, note: &str, updatedb: bool) -> bool {
     let plan = plan_deploy(
         state.tools.terminus_path(),
         site,
         env,
-        DEFAULT_NOTE,
+        note,
         false,
         updatedb,
     );

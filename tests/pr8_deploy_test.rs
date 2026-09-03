@@ -117,6 +117,7 @@ fn live_deploy_has_note_and_no_sync_content() {
         env: "live".into(),
     };
     app.handle_key(key(KeyCode::Char('e'))).unwrap();
+    app.handle_key(key(KeyCode::Enter)).unwrap();
     let plan = match app.state.current.as_ref() {
         Some(StagedPlan::One(p)) => p,
         other => panic!("expected live deploy plan, got {other:?}"),
@@ -140,6 +141,7 @@ fn drupal_test_deploy_includes_updatedb() {
         env: "test".into(),
     };
     app.handle_key(key(KeyCode::Char('e'))).unwrap();
+    app.handle_key(key(KeyCode::Enter)).unwrap();
     match app.state.current.as_ref() {
         Some(StagedPlan::Workflow { plan, .. }) => {
             let deploy = plan

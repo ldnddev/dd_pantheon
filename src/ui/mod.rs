@@ -217,6 +217,25 @@ fn draw_modal(f: &mut Frame, state: &mut AppState, area: Rect) {
         }) => {
             modals::draw_backup_pick(f, &state.theme, modal_area, &files, selected, kind);
         }
+        Some(Modal::DeployNote {
+            env,
+            note,
+            sync_content,
+            updatedb,
+            focus,
+            ..
+        }) => {
+            modals::draw_deploy_note(
+                f,
+                &state.theme,
+                modal_area,
+                &env,
+                &note,
+                sync_content,
+                updatedb,
+                focus,
+            );
+        }
         Some(Modal::Filter { query }) => {
             let p = Paragraph::new(format!("/{query}"))
                 .style(state.theme.input_text_focus)
