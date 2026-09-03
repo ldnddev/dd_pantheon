@@ -330,6 +330,95 @@ pub fn draw_site_create(f: &mut Frame, theme: &Theme, area: Rect, form: &SiteCre
     f.render_widget(p, area);
 }
 
+pub fn draw_multidev_create(
+    f: &mut Frame,
+    theme: &Theme,
+    area: Rect,
+    site: &str,
+    name: &str,
+    sources: &[String],
+    source_idx: usize,
+) {
+    let source = sources
+        .get(source_idx)
+        .map(|s| s.as_str())
+        .unwrap_or("live");
+    let lines = vec![
+        Line::from(Span::styled(
+            format!("Create multidev on {site}"),
+            theme.modal_header.add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("name    ", theme.modal_label),
+            Span::styled(name.to_string(), theme.input_text_focus),
+        ]),
+        Line::from(vec![
+            Span::styled("source  ", theme.modal_label),
+            Span::raw(source.to_string()),
+        ]),
+        Line::from(""),
+        Line::from("≤11 lowercase alnum/dashes. j/k source. Enter create. Esc cancel."),
+    ];
+    let p = Paragraph::new(lines).wrap(Wrap { trim: false }).block(
+        Block::default()
+            .title("multidev:create")
+            .borders(Borders::ALL)
+            .border_style(theme.input_border_focus)
+            .style(theme.modal),
+    );
+    f.render_widget(p, area);
+}
+
+pub fn draw_clone_content(
+    f: &mut Frame,
+    theme: &Theme,
+    area: Rect,
+    site: &str,
+    target: &str,
+    origins: &[String],
+    origin_idx: usize,
+    cc: bool,
+    db_only: bool,
+    files_only: bool,
+    updatedb: bool,
+) {
+    let origin = origins
+        .get(origin_idx)
+        .map(|s| s.as_str())
+        .unwrap_or("live");
+    let mark = |on: bool| if on { "[x]" } else { "[ ]" };
+    let lines = vec![
+        Line::from(Span::styled(
+            format!("Clone content onto {site}.{target}"),
+            theme.modal_header.add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "backup-first; live target is LiveGate",
+            theme.warning_style,
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("origin   ", theme.modal_label),
+            Span::raw(origin.to_string()),
+        ]),
+        Line::from(format!("  {} --cc        (c)", mark(cc))),
+        Line::from(format!("  {} --db-only   (d)", mark(db_only))),
+        Line::from(format!("  {} --files-only (f)", mark(files_only))),
+        Line::from(format!("  {} --updatedb  (u)", mark(updatedb))),
+        Line::from(""),
+        Line::from("j/k origin  Enter stage  Esc cancel"),
+    ];
+    let p = Paragraph::new(lines).wrap(Wrap { trim: false }).block(
+        Block::default()
+            .title("env:clone-content")
+            .borders(Borders::ALL)
+            .border_style(theme.warning_style)
+            .style(theme.modal),
+    );
+    f.render_widget(p, area);
+}
+
 fn field<'a>(theme: &'a Theme, focused: bool, key: &str, value: &str) -> Line<'a> {
     let marker = if focused { ">" } else { " " };
     let style = if focused {

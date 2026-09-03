@@ -1,11 +1,13 @@
 pub mod auth;
 pub mod backup;
+pub mod content;
 pub mod create;
 pub mod deploy;
 pub mod domains;
 pub mod inventory;
 pub mod local;
 pub mod metrics;
+pub mod multidev;
 pub mod tags;
 
 use crate::jobs::{self, JobKind};
@@ -42,6 +44,11 @@ pub fn stage_action(state: &mut AppState, action_id: &str) -> bool {
             create::open(state);
             false
         }
+        "multidev-create" => multidev::open_create(state),
+        "multidev-merge" => multidev::stage_merge(state),
+        "multidev-delete" => multidev::stage_delete(state),
+        "clone-content" => content::open_clone(state),
+        "wipe" => content::stage_wipe(state),
         "a" => {
             tags::open_add(state);
             false
@@ -122,6 +129,13 @@ pub fn request_run(state: &mut AppState) {
             };
             let total = wf.steps.len();
             let wf_safety = wf.safety;
+            let shown = wf
+                .steps
+                .iter()
+                .rev()
+                .find(|s| s.safety == wf_safety)
+                .cloned()
+                .unwrap_or_else(|| plan.clone());
             let staged = StagedPlan::Workflow { plan: wf, step };
             match wf_safety {
                 SafetyTier::ReadOnly | SafetyTier::Mutating => {
@@ -130,13 +144,13 @@ pub fn request_run(state: &mut AppState) {
                 }
                 SafetyTier::Destructive => {
                     state.pending_workflow = Some(staged);
-                    state.modal = Some(Modal::ConfirmDestructive { plan });
+                    state.modal = Some(Modal::ConfirmDestructive { plan: shown });
                 }
                 SafetyTier::LiveGate => {
-                    let expected = safety::live_gate_word(&plan).unwrap_or("live").to_string();
+                    let expected = safety::live_gate_word(&shown).unwrap_or("live").to_string();
                     state.pending_workflow = Some(staged);
                     state.modal = Some(Modal::LiveGate {
-                        plan,
+                        plan: shown,
                         expected,
                         typed: String::new(),
                     });
@@ -162,6 +176,25 @@ pub fn request_run(state: &mut AppState) {
 
 pub fn start_user_job(state: &mut AppState, plan: crate::plan::CommandPlan) {
     start_job(state, plan, JobKind::User);
+}
+
+/// After Destructive/LiveGate confirm: run the pending workflow's current step
+/// (backup-first) rather than the displayed gate plan.
+pub fn confirm_gated_plan(state: &mut AppState, fallback: crate::plan::CommandPlan) {
+    if let Some(StagedPlan::Workflow { plan: wf, step }) = state.pending_workflow.clone() {
+        if let Some(p) = wf.steps.get(step).cloned() {
+            start_job(
+                state,
+                p,
+                JobKind::Workflow {
+                    step,
+                    total: wf.steps.len(),
+                },
+            );
+            return;
+        }
+    }
+    start_user_job(state, fallback);
 }
 
 pub fn start_job(

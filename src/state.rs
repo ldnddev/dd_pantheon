@@ -101,6 +101,22 @@ pub enum Modal {
     SiteCreate {
         form: SiteCreateForm,
     },
+    MultidevCreate {
+        site: String,
+        name: String,
+        sources: Vec<String>,
+        source_idx: usize,
+    },
+    CloneContent {
+        site: String,
+        target: String,
+        origins: Vec<String>,
+        origin_idx: usize,
+        cc: bool,
+        db_only: bool,
+        files_only: bool,
+        updatedb: bool,
+    },
     Error {
         msg: String,
     },

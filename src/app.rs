@@ -162,6 +162,7 @@ fn apply_event(state: &mut AppState, ev: JobEvent) {
                 is_tag_mutate,
                 is_backup_mutate,
                 is_site_create,
+                env_mutate_site,
                 commit_target,
                 connection_target,
             ) = if let Some(job) = state.jobs.get(&id) {
@@ -170,6 +171,21 @@ fn apply_event(state: &mut AppState, ev: JobEvent) {
                     job.plan.argv.get(1).cloned()
                 } else {
                     None
+                };
+                let env_mutate_site = match cmd {
+                    Some(
+                        "multidev:create"
+                        | "multidev:delete"
+                        | "multidev:merge-to-dev"
+                        | "env:wipe"
+                        | "env:clone-content",
+                    ) => match &job.plan.target {
+                        PlanTarget::Env { site, .. } | PlanTarget::Site { site } => {
+                            Some(site.clone())
+                        }
+                        _ => None,
+                    },
+                    _ => None,
                 };
                 let commit_target = if cmd == Some("env:commit") {
                     match &job.plan.target {
@@ -189,6 +205,7 @@ fn apply_event(state: &mut AppState, ev: JobEvent) {
                     matches!(cmd, Some("tag:add" | "tag:remove" | "tag:rm")),
                     matches!(cmd, Some("backup:create" | "backup:restore")),
                     cmd == Some("site:create"),
+                    env_mutate_site,
                     commit_target,
                     connection_target,
                 )
@@ -250,6 +267,9 @@ fn apply_event(state: &mut AppState, ev: JobEvent) {
                     }
                     if is_site_create {
                         crate::workflows::create::on_created(state);
+                    }
+                    if let Some(site) = &env_mutate_site {
+                        crate::workflows::multidev::on_env_mutate(state, site);
                     }
                     if let Some((site, env)) = &commit_target {
                         crate::workflows::deploy::on_commit_done(state, site, env);

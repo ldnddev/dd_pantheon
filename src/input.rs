@@ -28,7 +28,9 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
                 | Modal::Login { .. }
                 | Modal::LiveGate { .. }
                 | Modal::TagAdd { .. }
-                | Modal::SiteCreate { .. },
+                | Modal::SiteCreate { .. }
+                | Modal::MultidevCreate { .. }
+                | Modal::CloneContent { .. },
         )
     );
 
@@ -311,7 +313,7 @@ fn handle_modal(state: &mut AppState, key: KeyEvent, modal: Modal) -> Result<boo
             KeyCode::Esc => state.modal = None,
             KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => {
                 state.modal = None;
-                crate::workflows::start_user_job(state, plan);
+                crate::workflows::confirm_gated_plan(state, plan);
             }
             _ => {}
         },
@@ -324,7 +326,7 @@ fn handle_modal(state: &mut AppState, key: KeyEvent, modal: Modal) -> Result<boo
             KeyCode::Enter => {
                 if typed == expected {
                     state.modal = None;
-                    crate::workflows::start_user_job(state, plan);
+                    crate::workflows::confirm_gated_plan(state, plan);
                 } else {
                     state.show_toast(ToastLevel::Warning, format!("type `{expected}` to confirm"));
                     state.modal = Some(Modal::LiveGate {
@@ -361,6 +363,200 @@ fn handle_modal(state: &mut AppState, key: KeyEvent, modal: Modal) -> Result<boo
         Modal::SiteCreate { mut form } => {
             handle_site_create(state, key, &mut form);
         }
+        Modal::MultidevCreate {
+            site,
+            mut name,
+            sources,
+            mut source_idx,
+        } => match key.code {
+            KeyCode::Esc => state.modal = None,
+            KeyCode::Enter => {
+                let source = sources
+                    .get(source_idx)
+                    .cloned()
+                    .unwrap_or_else(|| "live".into());
+                if !crate::workflows::multidev::valid_name(name.trim()) {
+                    state.show_toast(
+                        ToastLevel::Warning,
+                        "multidev name: ≤11 chars, lowercase alnum/dashes, not dev/test/live",
+                    );
+                    state.modal = Some(Modal::MultidevCreate {
+                        site,
+                        name,
+                        sources,
+                        source_idx,
+                    });
+                } else {
+                    state.modal = None;
+                    crate::workflows::multidev::submit_create(state, site, name, source);
+                }
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                if !sources.is_empty() {
+                    source_idx = (source_idx + 1).min(sources.len() - 1);
+                }
+                state.modal = Some(Modal::MultidevCreate {
+                    site,
+                    name,
+                    sources,
+                    source_idx,
+                });
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                source_idx = source_idx.saturating_sub(1);
+                state.modal = Some(Modal::MultidevCreate {
+                    site,
+                    name,
+                    sources,
+                    source_idx,
+                });
+            }
+            KeyCode::Backspace => {
+                name.pop();
+                state.modal = Some(Modal::MultidevCreate {
+                    site,
+                    name,
+                    sources,
+                    source_idx,
+                });
+            }
+            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                name.push(c);
+                state.modal = Some(Modal::MultidevCreate {
+                    site,
+                    name,
+                    sources,
+                    source_idx,
+                });
+            }
+            _ => {
+                state.modal = Some(Modal::MultidevCreate {
+                    site,
+                    name,
+                    sources,
+                    source_idx,
+                });
+            }
+        },
+        Modal::CloneContent {
+            site,
+            target,
+            origins,
+            mut origin_idx,
+            mut cc,
+            mut db_only,
+            mut files_only,
+            mut updatedb,
+        } => match key.code {
+            KeyCode::Esc => state.modal = None,
+            KeyCode::Enter => {
+                let origin = origins
+                    .get(origin_idx)
+                    .cloned()
+                    .unwrap_or_else(|| "live".into());
+                crate::workflows::content::submit_clone(
+                    state, site, target, origin, cc, db_only, files_only, updatedb,
+                );
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                if !origins.is_empty() {
+                    origin_idx = (origin_idx + 1).min(origins.len() - 1);
+                }
+                state.modal = Some(Modal::CloneContent {
+                    site,
+                    target,
+                    origins,
+                    origin_idx,
+                    cc,
+                    db_only,
+                    files_only,
+                    updatedb,
+                });
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                origin_idx = origin_idx.saturating_sub(1);
+                state.modal = Some(Modal::CloneContent {
+                    site,
+                    target,
+                    origins,
+                    origin_idx,
+                    cc,
+                    db_only,
+                    files_only,
+                    updatedb,
+                });
+            }
+            KeyCode::Char('c') => {
+                cc = !cc;
+                state.modal = Some(Modal::CloneContent {
+                    site,
+                    target,
+                    origins,
+                    origin_idx,
+                    cc,
+                    db_only,
+                    files_only,
+                    updatedb,
+                });
+            }
+            KeyCode::Char('d') => {
+                db_only = !db_only;
+                if db_only {
+                    files_only = false;
+                }
+                state.modal = Some(Modal::CloneContent {
+                    site,
+                    target,
+                    origins,
+                    origin_idx,
+                    cc,
+                    db_only,
+                    files_only,
+                    updatedb,
+                });
+            }
+            KeyCode::Char('f') => {
+                files_only = !files_only;
+                if files_only {
+                    db_only = false;
+                }
+                state.modal = Some(Modal::CloneContent {
+                    site,
+                    target,
+                    origins,
+                    origin_idx,
+                    cc,
+                    db_only,
+                    files_only,
+                    updatedb,
+                });
+            }
+            KeyCode::Char('u') => {
+                updatedb = !updatedb;
+                state.modal = Some(Modal::CloneContent {
+                    site,
+                    target,
+                    origins,
+                    origin_idx,
+                    cc,
+                    db_only,
+                    files_only,
+                    updatedb,
+                });
+            }
+            _ => {
+                state.modal = Some(Modal::CloneContent {
+                    site,
+                    target,
+                    origins,
+                    origin_idx,
+                    cc,
+                    db_only,
+                    files_only,
+                    updatedb,
+                });
+            }
+        },
         Modal::DiffstatDirty { site, env, files } => match key.code {
             KeyCode::Esc => state.modal = None,
             KeyCode::Enter | KeyCode::Char('c') => {
@@ -512,9 +708,12 @@ fn handle_inspector(state: &mut AppState, key: KeyEvent) -> Result<bool> {
         }
         KeyCode::Enter => {
             if let Some(id) = state.selected_action_id() {
-                crate::workflows::stage_action(state, id);
+                if crate::workflows::stage_action(state, id) {
+                    crate::workflows::request_run(state);
+                }
+            } else {
+                crate::workflows::request_run(state);
             }
-            crate::workflows::request_run(state);
         }
         KeyCode::Char('1') => state.inspector_tab = InspectorTab::Info,
         KeyCode::Char('2') => state.inspector_tab = InspectorTab::Metrics,

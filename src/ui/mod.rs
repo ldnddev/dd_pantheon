@@ -126,6 +126,46 @@ fn draw_modal(f: &mut Frame, state: &mut AppState, area: Rect) {
         Some(Modal::SiteCreate { form }) => {
             modals::draw_site_create(f, &state.theme, modal_area, &form);
         }
+        Some(Modal::MultidevCreate {
+            site,
+            name,
+            sources,
+            source_idx,
+        }) => {
+            modals::draw_multidev_create(
+                f,
+                &state.theme,
+                modal_area,
+                &site,
+                &name,
+                &sources,
+                source_idx,
+            );
+        }
+        Some(Modal::CloneContent {
+            site,
+            target,
+            origins,
+            origin_idx,
+            cc,
+            db_only,
+            files_only,
+            updatedb,
+        }) => {
+            modals::draw_clone_content(
+                f,
+                &state.theme,
+                modal_area,
+                &site,
+                &target,
+                &origins,
+                origin_idx,
+                cc,
+                db_only,
+                files_only,
+                updatedb,
+            );
+        }
         Some(Modal::Filter { query }) => {
             let p = Paragraph::new(format!("/{query}"))
                 .style(state.theme.input_text_focus)
