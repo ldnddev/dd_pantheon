@@ -17,6 +17,7 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect, scroll: u16) {
     lines.push(line(":", "Palette (fuzzy catalog; never auto-runs)"));
     lines.push(line("Ctrl+K", "Palette"));
     lines.push(line("Ctrl+L", "Login (machine token)"));
+    lines.push(line("Actions", "Logout when logged in (Mutating)"));
     lines.push(line("Ctrl+C", "Cancel running job"));
 
     push_header(&mut lines, state, "Tree");
@@ -65,7 +66,10 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect, scroll: u16) {
         "Enter",
         "Run plan (gates apply). --demo never spawns user plans",
     ));
-    lines.push(line("y", "Copy redacted argv (preview focus)"));
+    lines.push(line(
+        "y",
+        "Copy redacted argv (wl-copy/xclip; preview focus)",
+    ));
     lines.push(line("c", "no-op in preview (not copy, not clear-cache)"));
     lines.push(line("j/k", "Scroll"));
 

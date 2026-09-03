@@ -281,6 +281,7 @@ pub fn submit(state: &mut AppState, form: PaletteForm) {
             );
             state.config.mark_dirty();
             state.modal = None;
+            crate::debuglog::plan_staged(&plan);
             state.current = Some(plan);
             // Palette never auto-runs.
         }

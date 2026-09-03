@@ -1171,12 +1171,25 @@ fn handle_inspector(state: &mut AppState, key: KeyEvent) -> Result<bool> {
     Ok(false)
 }
 
+fn copy_preview(state: &mut AppState) {
+    let Some(plan) = state.current.as_ref().and_then(|p| p.current()) else {
+        state.show_toast(ToastLevel::Warning, "no plan staged");
+        return;
+    };
+    let line = plan.redacted_shell_line();
+    match crate::clipboard::copy_text(&line) {
+        Ok(()) => {
+            state.log_lines.push(format!("copied: {line}"));
+            state.show_toast(ToastLevel::Info, "copied");
+        }
+        Err(err) => state.show_toast(ToastLevel::Warning, err),
+    }
+}
+
 fn handle_preview(state: &mut AppState, key: KeyEvent) -> Result<bool> {
     match key.code {
         KeyCode::Enter => crate::workflows::request_run(state),
-        KeyCode::Char('y') => {
-            state.show_toast(ToastLevel::Info, "copied (clipboard lands later)");
-        }
+        KeyCode::Char('y') => copy_preview(state),
         KeyCode::Char('c') => {}
         KeyCode::Char('j') | KeyCode::Down => {
             state.preview_scroll = state.preview_scroll.saturating_add(1);

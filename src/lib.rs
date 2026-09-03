@@ -1,6 +1,8 @@
 pub mod app;
 pub mod catalog;
+pub mod clipboard;
 pub mod config;
+pub mod debuglog;
 pub mod doctor;
 pub mod fixtures;
 pub mod input;

@@ -82,7 +82,8 @@ impl InspectorTab {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Framework {
     WordPress,
     Drupal,
@@ -186,13 +187,34 @@ pub struct LocalApp {
     pub url: Option<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SiteOverlay {
+    #[serde(default)]
     pub cms: Option<Framework>,
+    #[serde(default = "default_true")]
     pub multidev_ok: bool,
+    #[serde(default)]
     pub composer_managed: bool,
+    #[serde(default)]
     pub git_branch: Option<String>,
+    #[serde(default)]
     pub local_path: Option<PathBuf>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for SiteOverlay {
+    fn default() -> Self {
+        Self {
+            cms: None,
+            multidev_ok: true,
+            composer_managed: false,
+            git_branch: None,
+            local_path: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

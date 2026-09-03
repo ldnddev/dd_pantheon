@@ -1,4 +1,4 @@
-use crate::models::{LayoutId, MetricsPeriod};
+use crate::models::{LayoutId, MetricsPeriod, SiteOverlay};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -18,6 +18,9 @@ pub struct AppConfig {
     pub last_env: Option<String>,
     #[serde(default)]
     pub metrics_period: MetricsPeriod,
+    /// File debug log at XDG state `…/dd_pantheon/app.log`. Also honors `RUST_LOG`.
+    #[serde(default)]
+    pub debug_log: bool,
     /// Last 50 palette/CMS lines. Table (must sit before `[orgs]` / `[locals]`).
     #[serde(default)]
     pub history: History,
@@ -60,11 +63,18 @@ impl Default for AppConfig {
             last_site: None,
             last_env: None,
             metrics_period: MetricsPeriod::Day,
+            debug_log: false,
             history: History::default(),
             orgs: HashMap::new(),
             locals: HashMap::new(),
         }
     }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct SitesFile {
+    #[serde(default)]
+    pub sites: HashMap<String, SiteOverlay>,
 }
 
 #[derive(Clone, Debug)]
@@ -73,42 +83,51 @@ pub struct ConfigStore {
     pub config: AppConfig,
     pub dirty_since: Option<Instant>,
     pub load_warning: Option<String>,
+    pub sites_path: PathBuf,
+    pub sites: HashMap<String, SiteOverlay>,
+    pub sites_dirty_since: Option<Instant>,
 }
 
 impl ConfigStore {
     pub fn load(dir: &Path) -> Self {
         let path = dir.join("config.toml");
-        if !path.exists() {
-            return Self {
-                path,
-                config: AppConfig::default(),
-                dirty_since: None,
-                load_warning: None,
-            };
-        }
-        match fs::read_to_string(&path) {
-            Ok(raw) => match toml::from_str::<AppConfig>(&raw) {
-                Ok(config) => Self {
-                    path,
-                    config,
-                    dirty_since: None,
-                    load_warning: None,
+        let (config, mut load_warning) = if !path.exists() {
+            (AppConfig::default(), None)
+        } else {
+            match fs::read_to_string(&path) {
+                Ok(raw) => match toml::from_str::<AppConfig>(&raw) {
+                    Ok(config) => (config, None),
+                    Err(err) => (
+                        AppConfig::default(),
+                        Some(format!(
+                            "config.toml parse failed ({err}); using defaults, file not overwritten"
+                        )),
+                    ),
                 },
-                Err(err) => Self {
-                    path,
-                    config: AppConfig::default(),
-                    dirty_since: None,
-                    load_warning: Some(format!(
-                        "config.toml parse failed ({err}); using defaults, file not overwritten"
-                    )),
-                },
-            },
-            Err(err) => Self {
-                path,
-                config: AppConfig::default(),
-                dirty_since: None,
-                load_warning: Some(format!("could not read config.toml: {err}")),
-            },
+                Err(err) => (
+                    AppConfig::default(),
+                    Some(format!("could not read config.toml: {err}")),
+                ),
+            }
+        };
+        let sites_path = dir.join("sites.toml");
+        let sites = match load_sites_file(&sites_path) {
+            Ok(map) => map,
+            Err(warn) => {
+                if load_warning.is_none() {
+                    load_warning = Some(warn);
+                }
+                HashMap::new()
+            }
+        };
+        Self {
+            path,
+            config,
+            dirty_since: None,
+            load_warning,
+            sites_path,
+            sites,
+            sites_dirty_since: None,
         }
     }
 
@@ -116,17 +135,27 @@ impl ConfigStore {
         self.dirty_since = Some(Instant::now());
     }
 
+    pub fn mark_sites_dirty(&mut self) {
+        self.sites_dirty_since = Some(Instant::now());
+    }
+
     pub fn flush_if_due(&mut self) {
-        let Some(since) = self.dirty_since else {
-            return;
-        };
-        if since.elapsed() < CONFIG_WRITE_DEBOUNCE {
-            return;
+        if let Some(since) = self.dirty_since {
+            if since.elapsed() >= CONFIG_WRITE_DEBOUNCE {
+                if let Err(err) = self.write_now() {
+                    self.load_warning = Some(format!("failed to write config: {err:#}"));
+                }
+                self.dirty_since = None;
+            }
         }
-        if let Err(err) = self.write_now() {
-            self.load_warning = Some(format!("failed to write config: {err:#}"));
+        if let Some(since) = self.sites_dirty_since {
+            if since.elapsed() >= CONFIG_WRITE_DEBOUNCE {
+                if let Err(err) = self.write_sites_now() {
+                    self.load_warning = Some(format!("failed to write sites.toml: {err:#}"));
+                }
+                self.sites_dirty_since = None;
+            }
         }
-        self.dirty_since = None;
     }
 
     pub fn write_now(&self) -> Result<()> {
@@ -140,6 +169,52 @@ impl ConfigStore {
             .with_context(|| format!("rename {} -> {}", tmp.display(), self.path.display()))?;
         Ok(())
     }
+
+    pub fn write_sites_now(&self) -> Result<()> {
+        if let Some(parent) = self.sites_path.parent() {
+            fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+        }
+        let file = SitesFile {
+            sites: self.sites.clone(),
+        };
+        let body = toml::to_string_pretty(&file).context("serialize sites.toml")?;
+        let tmp = self.sites_path.with_extension("toml.tmp");
+        fs::write(&tmp, body).with_context(|| format!("write {}", tmp.display()))?;
+        fs::rename(&tmp, &self.sites_path).with_context(|| {
+            format!("rename {} -> {}", tmp.display(), self.sites_path.display())
+        })?;
+        Ok(())
+    }
+
+    /// Persist a bound path: overlay entry → `sites.toml`; else `[locals]`.
+    pub fn persist_local_path(&mut self, site: &str, path: &Path) {
+        if self.sites.contains_key(site) {
+            if let Some(entry) = self.sites.get_mut(site) {
+                entry.local_path = Some(path.to_path_buf());
+            }
+            self.mark_sites_dirty();
+            if self.config.locals.remove(site).is_some() {
+                self.mark_dirty();
+            }
+        } else {
+            self.config
+                .locals
+                .insert(site.to_string(), path.display().to_string());
+            self.mark_dirty();
+        }
+    }
+}
+
+fn load_sites_file(path: &Path) -> Result<HashMap<String, SiteOverlay>, String> {
+    if !path.exists() {
+        return Ok(HashMap::new());
+    }
+    let raw =
+        fs::read_to_string(path).map_err(|err| format!("could not read sites.toml: {err}"))?;
+    let file: SitesFile = toml::from_str(&raw).map_err(|err| {
+        format!("sites.toml parse failed ({err}); using empty overlay, file not overwritten")
+    })?;
+    Ok(file.sites)
 }
 
 #[cfg(test)]
@@ -170,6 +245,7 @@ mod tests {
     #[test]
     fn history_table_serializes_before_orgs() {
         let cfg = AppConfig {
+            debug_log: true,
             history: History {
                 palette: vec!["env:clear-cache".into()],
                 cms: vec!["status".into()],
@@ -178,9 +254,44 @@ mod tests {
             ..AppConfig::default()
         };
         let raw = toml::to_string_pretty(&cfg).expect("toml");
+        let debug = raw.find("debug_log").expect("debug_log scalar");
         let hist = raw.find("[history]").expect("history table");
         let orgs = raw.find("[orgs]").expect("orgs table");
-        assert!(hist < orgs, "scalars/history must precede [orgs]: {raw}");
+        assert!(
+            debug < hist && hist < orgs,
+            "scalars then [history] then [orgs]: {raw}"
+        );
+    }
+
+    #[test]
+    fn sites_toml_roundtrip_and_persist_prefers_overlay() {
+        let dir = std::env::temp_dir().join(format!(
+            "dd_pantheon_sites_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("sites.toml"),
+            "[sites.acme-wp]\ncms = \"wordpress\"\nmultidev_ok = false\n",
+        )
+        .unwrap();
+        let mut store = ConfigStore::load(&dir);
+        let overlay = store.sites.get("acme-wp").expect("overlay");
+        assert_eq!(overlay.cms, Some(crate::models::Framework::WordPress));
+        assert!(!overlay.multidev_ok);
+        store.persist_local_path("acme-wp", Path::new("/tmp/acme-wp"));
+        assert_eq!(
+            store.sites["acme-wp"].local_path.as_deref(),
+            Some(Path::new("/tmp/acme-wp"))
+        );
+        assert!(!store.config.locals.contains_key("acme-wp"));
+        store.persist_local_path("other-site", Path::new("/tmp/other"));
+        assert_eq!(store.config.locals["other-site"], "/tmp/other");
+        let _ = fs::remove_dir_all(dir);
     }
 }
 

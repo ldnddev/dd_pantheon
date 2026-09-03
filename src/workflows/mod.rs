@@ -40,6 +40,7 @@ pub fn stage_action(state: &mut AppState, action_id: &str) -> bool {
             stage_login(state);
             false
         }
+        "logout" => stage_logout(state),
         "cms" | "m" => {
             cms::open(state);
             false
@@ -75,6 +76,17 @@ pub fn stage_action(state: &mut AppState, action_id: &str) -> bool {
 
 fn stage_login(state: &mut AppState) {
     open_login(state);
+}
+
+fn stage_logout(state: &mut AppState) -> bool {
+    if !state.tools.terminus_ok() && !state.demo {
+        state.show_toast(ToastLevel::Error, "terminus not on PATH");
+        return false;
+    }
+    let plan = auth::plan_logout(state.tools.terminus_path());
+    crate::debuglog::plan_staged(&StagedPlan::One(plan.clone()));
+    state.current = Some(StagedPlan::One(plan));
+    true
 }
 
 pub fn open_login(state: &mut AppState) {
@@ -247,6 +259,11 @@ pub fn start_job(
         }
     }
     let quiet = kind.quiet();
+    tracing::info!(
+        line = %plan.redacted_shell_line(),
+        kind = ?kind,
+        "job start"
+    );
     match jobs::spawn(state.job_hub.tx.clone(), plan, kind) {
         Ok(job) => {
             if mutating {

@@ -51,6 +51,13 @@ impl App {
             state.rebuild_tree();
         }
 
+        crate::debuglog::init(state.config.config.debug_log);
+        tracing::info!(
+            source = state.theme.source.label(),
+            demo = state.demo,
+            "theme source"
+        );
+
         if let Some(warn) = state.config.load_warning.clone() {
             state.show_toast(ToastLevel::Warning, warn);
         }
@@ -121,7 +128,11 @@ impl App {
     }
 
     pub fn save(&mut self) -> Result<()> {
-        self.state.config.write_now()
+        self.state.config.write_now()?;
+        if self.state.config.sites_dirty_since.is_some() || self.state.config.sites_path.exists() {
+            let _ = self.state.config.write_sites_now();
+        }
+        Ok(())
     }
 }
 
@@ -131,6 +142,12 @@ fn apply_event(state: &mut AppState, ev: JobEvent) {
             if let Some(job) = state.jobs.get_mut(&id) {
                 job.status = JobStatus::Running { pid, pgid };
                 job.pgid.store(pgid, std::sync::atomic::Ordering::SeqCst);
+                tracing::info!(
+                    line = %job.plan.redacted_shell_line(),
+                    pid,
+                    pgid,
+                    "job started"
+                );
             }
         }
         JobEvent::Chunk { id, stream, text } => {
@@ -163,6 +180,7 @@ fn apply_event(state: &mut AppState, ev: JobEvent) {
                 slot,
                 expects_json,
                 is_login,
+                is_logout,
                 is_tag_mutate,
                 is_backup_mutate,
                 is_site_create,
@@ -171,6 +189,11 @@ fn apply_event(state: &mut AppState, ev: JobEvent) {
                 commit_target,
                 connection_target,
             ) = if let Some(job) = state.jobs.get(&id) {
+                tracing::info!(
+                    line = %job.plan.redacted_shell_line(),
+                    status = ?status,
+                    "job exit"
+                );
                 let cmd = job.plan.argv.first().map(|a| a.as_str());
                 let connection_target = if cmd == Some("connection:set") {
                     job.plan.argv.get(1).cloned()
@@ -217,6 +240,7 @@ fn apply_event(state: &mut AppState, ev: JobEvent) {
                     job.plan.target.mutating_slot(),
                     job.plan.expects_json,
                     cmd == Some("auth:login"),
+                    cmd == Some("auth:logout"),
                     matches!(cmd, Some("tag:add" | "tag:remove" | "tag:rm")),
                     matches!(cmd, Some("backup:create" | "backup:restore")),
                     cmd == Some("site:create"),
@@ -267,7 +291,7 @@ fn apply_event(state: &mut AppState, ev: JobEvent) {
                     }
                     apply_doctor_result(state, &kind, &stdout, 0, "");
                     apply_inventory_result(state, &kind, &stdout);
-                    if is_login {
+                    if is_login || is_logout {
                         if let Some(t) = state.tools.terminus.clone() {
                             workflows::start_job(
                                 state,
@@ -342,6 +366,7 @@ fn apply_doctor_result(
     match kind {
         JobKind::DoctorWhoami => {
             state.auth = auth_from_output(exit, stdout, stderr);
+            crate::workflows::local::refresh_actions(state);
             if matches!(state.auth, crate::doctor::AuthState::LoggedIn { .. }) {
                 crate::workflows::inventory::request_site_list(state, true);
             }
@@ -353,6 +378,7 @@ fn apply_doctor_result(
                     .catalog
                     .retain(|e| e.tool != crate::plan::ToolKind::Terminus);
                 state.catalog.extend(entries);
+                tracing::info!(n = state.catalog.len(), "catalog size");
             }
             Err(err) => state
                 .doctor_warnings

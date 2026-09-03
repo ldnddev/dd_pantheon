@@ -367,12 +367,8 @@ pub fn bind_root(state: &mut AppState, path: &Path) {
         .clone()
         .or_else(|| local.lando_name.clone());
     if let Some(name) = site_name.clone() {
-        state
-            .config
-            .config
-            .locals
-            .insert(name.clone(), path.display().to_string());
-        state.config.mark_dirty();
+        state.config.persist_local_path(&name, path);
+        fill_overlay_from_local(state, &name, &local);
         if attach_local(state, &name, local.clone()) {
             refresh_actions(state);
             return;
@@ -425,9 +421,44 @@ fn attach_local(state: &mut AppState, site: &str, local: LocalApp) -> bool {
     true
 }
 
+fn fill_overlay_from_local(state: &mut AppState, site: &str, local: &LocalApp) {
+    let Some(entry) = state.config.sites.get_mut(site) else {
+        return;
+    };
+    let mut changed = false;
+    if entry.cms.is_none() {
+        if let Some(cms) = local.framework {
+            entry.cms = Some(cms);
+            changed = true;
+        }
+    }
+    if entry.local_path.is_none() {
+        entry.local_path = Some(local.path.clone());
+        changed = true;
+    }
+    if changed {
+        state.config.mark_sites_dirty();
+    }
+}
+
 pub fn reattach(state: &mut AppState, old: HashMap<String, LocalApp>) {
     for (name, local) in old {
         let _ = attach_local(state, &name, local);
+    }
+    let overlays = state.config.sites.clone();
+    for (name, overlay) in overlays {
+        if state
+            .sites
+            .iter()
+            .any(|s| s.name == name && s.local.is_some())
+        {
+            continue;
+        }
+        let Some(path) = overlay.local_path else {
+            continue;
+        };
+        let peek = lando::peek_lando_yml(&path).ok();
+        let _ = attach_local(state, &name, local_from_peek(&path, peek.as_ref()));
     }
     let locals = state.config.config.locals.clone();
     for (name, path) in locals {
@@ -468,6 +499,16 @@ pub fn refresh_actions(state: &mut AppState) {
             .is_some_and(|r| r.eq_ignore_ascii_case("pantheon"))
     });
     let mut actions = crate::models::default_actions();
+    if matches!(state.auth, crate::state::AuthState::LoggedIn { .. }) {
+        for a in &mut actions {
+            if a.id == "login" {
+                *a = ActionItem {
+                    id: "logout",
+                    label: "logout",
+                };
+            }
+        }
+    }
     if has_local {
         actions.extend([
             ActionItem {

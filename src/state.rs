@@ -561,6 +561,7 @@ impl AppState {
         self.layout = self.layout.cycle();
         self.config.config.layout = self.layout;
         self.config.mark_dirty();
+        tracing::info!(layout = self.layout.label(), "layout switch");
 
         self.selected = selected;
         self.expanded = expanded;

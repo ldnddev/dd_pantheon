@@ -358,6 +358,12 @@ pub fn apply_site_list(state: &mut AppState, json: &str) {
     match parse_site_list(json) {
         Ok(sites) => {
             let old = crate::workflows::local::snapshot_locals(state);
+            let mut sites = sites;
+            for site in &mut sites {
+                if let Some(overlay) = state.config.sites.get(&site.name) {
+                    site.overlay = Some(overlay.clone());
+                }
+            }
             state.sites = sites;
             crate::workflows::local::reattach(state, old);
             restore_selection(state);

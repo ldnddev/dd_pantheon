@@ -26,6 +26,24 @@ pub fn plan_login(terminus: PathBuf, token: &str) -> CommandPlan {
     }
 }
 
+pub fn plan_logout(terminus: PathBuf) -> CommandPlan {
+    CommandPlan {
+        tool: ToolKind::Terminus,
+        binary: terminus,
+        argv: vec!["auth:logout".into()],
+        cwd: None,
+        why: "end the Terminus session (does not write a token)".into(),
+        safety: SafetyTier::Mutating,
+        target: PlanTarget::None,
+        dry_run: false,
+        timeout: Some(Duration::from_secs(30)),
+        expects_json: false,
+        extra_env: vec![],
+        redact: vec![],
+        confirm_with_yes: true,
+    }
+}
+
 pub fn plan_whoami(terminus: PathBuf) -> CommandPlan {
     CommandPlan {
         tool: ToolKind::Terminus,
@@ -121,6 +139,15 @@ mod tests {
     fn whoami_logged_out_empty_stdout() {
         let auth = auth_from_output(0, "", "You are not logged in.\n");
         assert_eq!(auth, AuthState::LoggedOut);
+    }
+
+    #[test]
+    fn logout_is_mutating_without_token() {
+        let plan = plan_logout(PathBuf::from("terminus"));
+        assert_eq!(plan.argv, vec!["auth:logout".to_string()]);
+        assert_eq!(plan.safety, SafetyTier::Mutating);
+        assert!(plan.redact.is_empty());
+        assert!(plan.confirm_with_yes);
     }
 
     #[test]
