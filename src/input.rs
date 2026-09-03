@@ -357,6 +357,17 @@ fn handle_modal(state: &mut AppState, key: KeyEvent, modal: Modal) -> Result<boo
                 });
             }
         },
+        Modal::DiffstatDirty { site, env, files } => match key.code {
+            KeyCode::Esc => state.modal = None,
+            KeyCode::Enter | KeyCode::Char('c') => {
+                state.modal = None;
+                crate::workflows::deploy::stage_commit_from_diffstat(state, &site, &env);
+                crate::workflows::request_run(state);
+            }
+            _ => {
+                state.modal = Some(Modal::DiffstatDirty { site, env, files });
+            }
+        },
         Modal::Error { .. } => {
             if matches!(key.code, KeyCode::Esc | KeyCode::Enter) {
                 state.modal = None;

@@ -120,6 +120,9 @@ fn draw_modal(f: &mut Frame, state: &mut AppState, area: Rect) {
         Some(Modal::TagPicker { tags, selected }) => {
             modals::draw_tag_picker(f, &state.theme, modal_area, &tags, selected);
         }
+        Some(Modal::DiffstatDirty { site, env, files }) => {
+            modals::draw_diffstat_dirty(f, &state.theme, modal_area, &site, &env, &files);
+        }
         Some(Modal::Filter { query }) => {
             let p = Paragraph::new(format!("/{query}"))
                 .style(state.theme.input_text_focus)

@@ -67,6 +67,10 @@ pub enum JobKind {
         site: String,
         env: String,
     },
+    Diffstat {
+        site: String,
+        env: String,
+    },
 }
 
 impl JobKind {

@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod backup;
+pub mod deploy;
 pub mod domains;
 pub mod inventory;
 pub mod metrics;
@@ -8,7 +9,7 @@ pub mod tags;
 use crate::jobs::{self, JobKind};
 use crate::plan::{PlanTarget, SafetyTier, StagedPlan};
 use crate::safety;
-use crate::state::{AppState, Modal, TreeSel};
+use crate::state::{AppState, Modal};
 use crate::toast::ToastLevel;
 
 pub fn stage_action(state: &mut AppState, action_id: &str) -> bool {
@@ -16,7 +17,7 @@ pub fn stage_action(state: &mut AppState, action_id: &str) -> bool {
         "backup" | "b" => backup::stage_create(state),
         "cache" | "c" => domains::stage_clear_cache(state),
         "wake" => domains::stage_wake(state),
-        "deploy" | "e" => stage_deploy(state),
+        "deploy" | "e" => deploy::stage_deploy(state),
         "lando-start" | "s" => stage_lando(state, "start"),
         "lando-stop" | "S" => stage_lando(state, "stop"),
         "login" => {
@@ -44,81 +45,6 @@ pub fn stage_action(state: &mut AppState, action_id: &str) -> bool {
             false
         }
     }
-}
-
-fn env_target(state: &AppState) -> Option<PlanTarget> {
-    match &state.selected {
-        TreeSel::Env { site, env } => Some(PlanTarget::Env {
-            site: site.clone(),
-            env: env.clone(),
-        }),
-        TreeSel::Site(site) => state.envs.get(site).and_then(|envs| {
-            envs.first().map(|e| PlanTarget::Env {
-                site: site.clone(),
-                env: e.id.clone(),
-            })
-        }),
-        TreeSel::None => None,
-    }
-}
-
-fn stage_deploy(state: &mut AppState) -> bool {
-    let Some(target) = env_target(state) else {
-        state.show_toast(ToastLevel::Warning, "select an environment");
-        return false;
-    };
-    let site_env = target.label();
-    let live = matches!(&target, PlanTarget::Env { env, .. } if env == "live");
-    if live {
-        state.show_toast(
-            ToastLevel::Warning,
-            "live deploy is LiveGate — type live in PR 3; dry preview only",
-        );
-    }
-    let mut argv = vec!["env:deploy".into(), site_env.clone(), "--cc".into()];
-    let mut safety_tier = if live {
-        SafetyTier::LiveGate
-    } else {
-        SafetyTier::Mutating
-    };
-    if matches!(&target, PlanTarget::Env { env, .. } if env == "test") {
-        argv.push("--sync-content".into());
-        safety_tier = SafetyTier::Destructive;
-        let mut steps = safety::backup_first(state.tools.terminus_path(), &target);
-        let deploy = crate::tools::terminus::plan(
-            state.tools.terminus_path(),
-            argv,
-            format!("deploy code to {site_env} (sync-content from live)"),
-            safety_tier,
-            target.clone(),
-        );
-        steps.push(deploy);
-        let max_safety = steps
-            .iter()
-            .map(|s| s.safety)
-            .max()
-            .unwrap_or(SafetyTier::Mutating);
-        state.current = Some(StagedPlan::Workflow {
-            plan: crate::plan::WorkflowPlan {
-                title: format!("deploy {site_env}"),
-                why: format!("backup-first deploy to {site_env}"),
-                safety: max_safety,
-                steps,
-                stop_on_failure: true,
-            },
-            step: 0,
-        });
-        return true;
-    }
-    let plan = crate::tools::terminus::plan(
-        state.tools.terminus_path(),
-        argv,
-        format!("deploy code to {site_env}"),
-        safety_tier,
-        target,
-    );
-    state.current = Some(StagedPlan::One(plan));
-    true
 }
 
 fn stage_lando(state: &mut AppState, cmd: &str) -> bool {

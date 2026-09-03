@@ -93,6 +93,11 @@ pub enum Modal {
         tags: Vec<String>,
         selected: usize,
     },
+    DiffstatDirty {
+        site: String,
+        env: String,
+        files: Vec<String>,
+    },
     Error {
         msg: String,
     },

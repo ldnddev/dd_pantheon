@@ -144,6 +144,51 @@ pub fn draw_livegate(
     f.render_widget(input, chunks[1]);
 }
 
+pub fn draw_diffstat_dirty(
+    f: &mut Frame,
+    theme: &Theme,
+    area: Rect,
+    site: &str,
+    env: &str,
+    files: &[String],
+) {
+    let mut lines = vec![
+        Line::from(Span::styled(
+            format!("dirty env:diffstat — {site}.{env}"),
+            theme.modal_header.add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "connection:set git is blocked until this is clean.",
+            theme.warning_style,
+        )),
+        Line::from(format!("{} uncommitted file(s):", files.len())),
+    ];
+    for name in files.iter().take(8) {
+        lines.push(Line::from(Span::styled(
+            format!("  {name}"),
+            theme.modal_text,
+        )));
+    }
+    if files.len() > 8 {
+        lines.push(Line::from(Span::styled(
+            format!("  … {} more", files.len() - 8),
+            theme.secondary,
+        )));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from("c/Enter  commit via env:commit"));
+    lines.push(Line::from("Esc      abort (no discard)"));
+    let p = Paragraph::new(lines).wrap(Wrap { trim: false }).block(
+        Block::default()
+            .title("Diffstat")
+            .borders(Borders::ALL)
+            .border_style(theme.warning_style)
+            .style(theme.modal),
+    );
+    f.render_widget(p, area);
+}
+
 pub fn draw_tag_add(f: &mut Frame, theme: &Theme, area: Rect, value: &str) {
     let p = Paragraph::new(format!("tag: {value}"))
         .style(theme.input_text_focus)

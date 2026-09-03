@@ -3,7 +3,7 @@ use crate::config::ConfigStore;
 use crate::fixtures::demo_data;
 use crate::input::{handle_key, handle_mouse};
 use crate::jobs::{JobEvent, JobKind, JobStatus, Stream};
-use crate::plan::StagedPlan;
+use crate::plan::{PlanTarget, StagedPlan};
 use crate::state::AppState;
 use crate::theme::{ThemeStatus, load_theme};
 use crate::toast::ToastLevel;
@@ -164,8 +164,23 @@ fn apply_event(state: &mut AppState, ev: JobEvent) {
                 is_login,
                 is_tag_mutate,
                 is_backup_mutate,
+                commit_target,
+                connection_target,
             ) = if let Some(job) = state.jobs.get(&id) {
                 let cmd = job.plan.argv.first().map(|a| a.as_str());
+                let connection_target = if cmd == Some("connection:set") {
+                    job.plan.argv.get(1).cloned()
+                } else {
+                    None
+                };
+                let commit_target = if cmd == Some("env:commit") {
+                    match &job.plan.target {
+                        PlanTarget::Env { site, env } => Some((site.clone(), env.clone())),
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
                 (
                     job.kind.clone(),
                     job.stdout_raw.clone(),
@@ -175,6 +190,8 @@ fn apply_event(state: &mut AppState, ev: JobEvent) {
                     cmd == Some("auth:login"),
                     matches!(cmd, Some("tag:add" | "tag:remove" | "tag:rm")),
                     matches!(cmd, Some("backup:create" | "backup:restore")),
+                    commit_target,
+                    connection_target,
                 )
             } else {
                 return;
@@ -229,6 +246,14 @@ fn apply_event(state: &mut AppState, ev: JobEvent) {
                     }
                     if is_backup_mutate {
                         crate::workflows::backup::refresh_selected(state);
+                    }
+                    if let Some((site, env)) = &commit_target {
+                        crate::workflows::deploy::on_commit_done(state, site, env);
+                    }
+                    if let Some(target) = connection_target.as_deref() {
+                        if let Some((site, env)) = target.split_once('.') {
+                            crate::workflows::deploy::on_connection_set_done(state, site, env);
+                        }
                     }
                     advance_workflow(state);
                 }
@@ -326,6 +351,9 @@ fn apply_inventory_result(state: &mut AppState, kind: &JobKind, stdout: &str) {
         JobKind::BackupList { site, env } => {
             crate::workflows::backup::apply_list(state, site, env, stdout)
         }
+        JobKind::Diffstat { site, env } => {
+            crate::workflows::deploy::apply_diffstat(state, site, env, stdout)
+        }
         _ => {}
     }
 }
@@ -343,16 +371,10 @@ fn advance_workflow(state: &mut AppState) {
         // caller only advances on success
     }
     let next_plan = plan.steps[next].clone();
+    let total = plan.steps.len();
     state.pending_workflow = Some(StagedPlan::Workflow { plan, step: next });
     if let Some(StagedPlan::Workflow { step, .. }) = &mut state.current {
         *step = next;
     }
-    workflows::start_job(
-        state,
-        next_plan,
-        JobKind::Workflow {
-            step: next,
-            total: 0,
-        },
-    );
+    workflows::start_job(state, next_plan, JobKind::Workflow { step: next, total });
 }
