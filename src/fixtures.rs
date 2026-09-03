@@ -1,6 +1,6 @@
 use crate::models::{
-    Backup, ConnectionMode, Env, Framework, LocalApp, MetricsPeriod, MetricsPoint, MetricsSeries,
-    OrgRef, Site, SiteOverlay, Tag,
+    Backup, ConnectionMode, Domain, Env, Framework, HttpsRow, LocalApp, LockStatus, MetricsPeriod,
+    MetricsPoint, MetricsSeries, OrgRef, Site, SiteOverlay, Tag,
 };
 use crate::plan::{CommandPlan, PlanTarget, SafetyTier, StagedPlan, ToolKind};
 use std::collections::HashMap;
@@ -12,6 +12,9 @@ pub struct DemoData {
     pub envs: HashMap<String, Vec<Env>>,
     pub metrics: HashMap<(String, MetricsPeriod), MetricsSeries>,
     pub backups: HashMap<String, Vec<Backup>>,
+    pub domains: HashMap<String, Vec<Domain>>,
+    pub https: HashMap<String, Vec<HttpsRow>>,
+    pub locks: HashMap<String, LockStatus>,
     pub plan: StagedPlan,
     pub log_lines: Vec<String>,
 }
@@ -153,11 +156,70 @@ pub fn demo_data() -> DemoData {
     backups.insert("acme-wp.test".into(), dummy_backups("acme-wp", "test"));
     backups.insert("acme-wp.live".into(), dummy_backups("acme-wp", "live"));
 
+    let mut domains = HashMap::new();
+    domains.insert(
+        "acme-wp.test".into(),
+        vec![
+            Domain {
+                id: "test-acme-wp.pantheonsite.io".into(),
+                kind: "platform".into(),
+                primary: true,
+                deletable: false,
+                status: "ok".into(),
+            },
+            Domain {
+                id: "staging.example.com".into(),
+                kind: "custom".into(),
+                primary: false,
+                deletable: true,
+                status: "ok".into(),
+            },
+        ],
+    );
+    domains.insert(
+        "acme-wp.live".into(),
+        vec![Domain {
+            id: "www.example.com".into(),
+            kind: "custom".into(),
+            primary: true,
+            deletable: true,
+            status: "ok".into(),
+        }],
+    );
+    let mut https = HashMap::new();
+    https.insert(
+        "acme-wp.live".into(),
+        vec![HttpsRow {
+            id: "www.example.com".into(),
+            kind: "custom".into(),
+            status: "issued".into(),
+            status_message: String::new(),
+        }],
+    );
+    let mut locks = HashMap::new();
+    locks.insert(
+        "acme-wp.test".into(),
+        LockStatus {
+            locked: false,
+            username: None,
+        },
+    );
+    locks.insert(
+        "acme-wp.live".into(),
+        LockStatus {
+            locked: true,
+            username: Some("ops".into()),
+        },
+    );
+
     DemoData {
         sites: vec![acme_wp, acme_d10, frozen_lab],
         envs,
         metrics,
         backups,
+        domains,
+        https,
+        locks,
         plan: StagedPlan::One(dummy_backup_plan("acme-wp", "test")),
         log_lines: vec![
             "[12:01:03] Created backup_20260831_acme-wp_test.tgz".into(),

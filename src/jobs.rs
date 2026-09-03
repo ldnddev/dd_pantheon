@@ -77,6 +77,18 @@ pub enum JobKind {
     },
     CreateOrgList,
     CreateUpstreamList,
+    DomainList {
+        site: String,
+        env: String,
+    },
+    HttpsInfo {
+        site: String,
+        env: String,
+    },
+    LockInfo {
+        site: String,
+        env: String,
+    },
 }
 
 impl JobKind {
@@ -97,6 +109,9 @@ impl JobKind {
                 | Self::LandoInfo { .. }
                 | Self::CreateOrgList
                 | Self::CreateUpstreamList
+                | Self::DomainList { .. }
+                | Self::HttpsInfo { .. }
+                | Self::LockInfo { .. }
         )
     }
 }

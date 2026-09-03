@@ -3,8 +3,8 @@ use crate::config::ConfigStore;
 use crate::fixtures::{DemoData, dummy_backup_plan};
 use crate::jobs::{Job, JobHub, JobId};
 use crate::models::{
-    ActionItem, Backup, Env, InspectorTab, LayoutId, LocalApp, MetricsPeriod, MetricsSeries,
-    OrgRef, Site, UpstreamRef, default_actions,
+    ActionItem, Backup, Domain, Env, HttpsRow, InspectorTab, LayoutId, LocalApp, LockStatus,
+    MetricsPeriod, MetricsSeries, OrgRef, Site, UpstreamRef, default_actions,
 };
 use crate::plan::{CommandPlan, StagedPlan, ToolKind};
 use crate::theme::{Theme, ThemeStatus};
@@ -116,6 +116,32 @@ pub enum Modal {
         db_only: bool,
         files_only: bool,
         updatedb: bool,
+    },
+    DomainAdd {
+        site: String,
+        env: String,
+        value: String,
+    },
+    DomainRemove {
+        site: String,
+        env: String,
+        domains: Vec<String>,
+        selected: usize,
+    },
+    HttpsSet {
+        site: String,
+        env: String,
+        cert: String,
+        key: String,
+        intermediate: String,
+        focus: u8,
+    },
+    LockEnable {
+        site: String,
+        env: String,
+        username: String,
+        password: String,
+        focus: u8,
     },
     Error {
         msg: String,
@@ -231,6 +257,9 @@ pub struct AppState {
     pub metrics: HashMap<(String, MetricsPeriod), MetricsSeries>,
     pub metrics_period: MetricsPeriod,
     pub backups: HashMap<String, Vec<Backup>>,
+    pub domains: HashMap<String, Vec<Domain>>,
+    pub https: HashMap<String, Vec<HttpsRow>>,
+    pub locks: HashMap<String, LockStatus>,
 
     pub config: ConfigStore,
     pub should_quit: bool,
@@ -254,6 +283,7 @@ pub struct AppState {
     pub pending_tag_list: Option<(String, String, Instant)>,
     pub pending_metrics: Option<(String, String, Instant)>,
     pub pending_backup_list: Option<(String, String, Instant)>,
+    pub pending_edge: Option<(String, String, Instant)>,
     pub pending_lando: Option<Instant>,
     pub pending_local: Option<LocalApp>,
     pub create_orgs: Vec<OrgRef>,
@@ -314,6 +344,9 @@ impl AppState {
             metrics: data.metrics,
             metrics_period: config.config.metrics_period,
             backups: data.backups,
+            domains: data.domains,
+            https: data.https,
+            locks: data.locks,
             config,
             should_quit: false,
             last_frame: Rect::default(),
@@ -334,6 +367,7 @@ impl AppState {
             pending_tag_list: None,
             pending_metrics: None,
             pending_backup_list: None,
+            pending_edge: None,
             pending_lando: None,
             pending_local: None,
             create_orgs: Vec::new(),
@@ -474,6 +508,7 @@ impl AppState {
             crate::workflows::tags::on_selection_changed(self);
             crate::workflows::metrics::on_selection_changed(self);
             crate::workflows::backup::on_selection_changed(self);
+            crate::workflows::domains::on_selection_changed(self);
         }
         self.persist_selection();
     }
@@ -559,6 +594,35 @@ impl AppState {
                 .envs
                 .get(site)
                 .and_then(|envs| envs.iter().find(|e| e.id == *env)),
+            _ => None,
+        }
+    }
+
+    pub fn selected_domains(&self) -> &[Domain] {
+        match &self.selected {
+            TreeSel::Env { site, env } => self
+                .domains
+                .get(&format!("{site}.{env}"))
+                .map(|v| v.as_slice())
+                .unwrap_or(&[]),
+            _ => &[],
+        }
+    }
+
+    pub fn selected_https(&self) -> &[HttpsRow] {
+        match &self.selected {
+            TreeSel::Env { site, env } => self
+                .https
+                .get(&format!("{site}.{env}"))
+                .map(|v| v.as_slice())
+                .unwrap_or(&[]),
+            _ => &[],
+        }
+    }
+
+    pub fn selected_lock(&self) -> Option<&LockStatus> {
+        match &self.selected {
+            TreeSel::Env { site, env } => self.locks.get(&format!("{site}.{env}")),
             _ => None,
         }
     }

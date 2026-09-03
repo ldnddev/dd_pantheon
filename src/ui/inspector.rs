@@ -195,6 +195,35 @@ fn draw_info(f: &mut Frame, state: &mut AppState, area: Rect) {
                 )));
             }
         }
+        let domain_names: Vec<String> = state
+            .selected_domains()
+            .iter()
+            .take(4)
+            .map(|d| d.id.clone())
+            .collect();
+        if domain_names.is_empty() {
+            lines.push(kv(state, "domains", "—"));
+        } else {
+            lines.push(kv(state, "domains", &domain_names.join("  ")));
+        }
+        let https_line = state
+            .selected_https()
+            .first()
+            .map(|h| {
+                if h.status_message.is_empty() {
+                    h.status.clone()
+                } else {
+                    format!("{} ({})", h.status, h.status_message)
+                }
+            })
+            .unwrap_or_else(|| "—".into());
+        lines.push(kv(state, "https", &https_line));
+        let lock_line = match state.selected_lock() {
+            Some(l) if l.locked => format!("on  user {}", l.username.as_deref().unwrap_or("—")),
+            Some(_) => "off".into(),
+            None => env.locked.then_some("on").unwrap_or("off").into(),
+        };
+        lines.push(kv(state, "lock", &lock_line));
     } else if matches!(state.selected, crate::state::TreeSel::Site(_)) {
         lines.push(Line::from(Span::styled(
             "select an environment for metrics",

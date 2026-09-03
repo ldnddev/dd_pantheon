@@ -351,6 +351,7 @@ pub fn refresh(state: &mut AppState) {
     crate::workflows::metrics::refresh_selected(state);
     crate::workflows::backup::refresh_selected(state);
     crate::workflows::local::refresh_selected(state);
+    crate::workflows::domains::refresh_selected(state);
 }
 
 pub fn apply_site_list(state: &mut AppState, json: &str) {

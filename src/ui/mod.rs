@@ -166,6 +166,39 @@ fn draw_modal(f: &mut Frame, state: &mut AppState, area: Rect) {
                 updatedb,
             );
         }
+        Some(Modal::DomainAdd { value, .. }) => {
+            modals::draw_domain_add(f, &state.theme, modal_area, &value);
+        }
+        Some(Modal::DomainRemove {
+            domains, selected, ..
+        }) => {
+            modals::draw_domain_remove(f, &state.theme, modal_area, &domains, selected);
+        }
+        Some(Modal::HttpsSet {
+            cert,
+            key,
+            intermediate,
+            focus,
+            ..
+        }) => {
+            modals::draw_https_set(
+                f,
+                &state.theme,
+                modal_area,
+                &cert,
+                &key,
+                &intermediate,
+                focus,
+            );
+        }
+        Some(Modal::LockEnable {
+            username,
+            password,
+            focus,
+            ..
+        }) => {
+            modals::draw_lock_enable(f, &state.theme, modal_area, &username, &password, focus);
+        }
         Some(Modal::Filter { query }) => {
             let p = Paragraph::new(format!("/{query}"))
                 .style(state.theme.input_text_focus)

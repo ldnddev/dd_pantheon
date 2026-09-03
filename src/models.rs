@@ -292,6 +292,29 @@ pub enum CacheLevel {
 }
 
 #[derive(Clone, Debug)]
+pub struct Domain {
+    pub id: String,
+    pub kind: String,
+    pub primary: bool,
+    pub deletable: bool,
+    pub status: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct HttpsRow {
+    pub id: String,
+    pub kind: String,
+    pub status: String,
+    pub status_message: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct LockStatus {
+    pub locked: bool,
+    pub username: Option<String>,
+}
+
+#[derive(Clone, Debug)]
 pub struct Backup {
     pub file: String,
     pub size: String,

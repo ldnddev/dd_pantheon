@@ -510,6 +510,7 @@ pub fn refresh_actions(state: &mut AppState) {
     }
     actions.extend(crate::workflows::multidev::actions(state));
     actions.extend(crate::workflows::content::actions(state));
+    actions.extend(crate::workflows::domains::actions(state));
     actions.push(ActionItem {
         id: "lando-poweroff",
         label: "lando poweroff",

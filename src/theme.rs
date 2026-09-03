@@ -203,6 +203,8 @@ pub struct Theme {
     pub cursor: Style,
     pub scrollbar: Style,
     pub scrollbar_hover: Style,
+    pub folder: Style,
+    pub file: Style,
 }
 
 impl Theme {
@@ -271,6 +273,12 @@ impl Theme {
                 .add_modifier(Modifier::REVERSED),
             scrollbar: Style::default().fg(colors.scrollbar),
             scrollbar_hover: Style::default().fg(colors.scrollbar_hover),
+            folder: Style::default()
+                .fg(colors.folders)
+                .bg(colors.modal_background),
+            file: Style::default()
+                .fg(colors.files)
+                .bg(colors.modal_background),
         }
     }
 }

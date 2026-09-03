@@ -42,6 +42,10 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect, scroll: u16) {
         "(no W)",
         "Wipe is Actions only (backup-first; live is LiveGate)",
     ));
+    lines.push(line(
+        "Actions",
+        "domains / HTTPS / lock (password redacted)",
+    ));
     lines.push(line("x", "Remove selected tag chip (inspector)"));
     lines.push(line("[ / ]", "Cycle tag chips (inspector)"));
 

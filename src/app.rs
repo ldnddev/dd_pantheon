@@ -45,6 +45,9 @@ impl App {
             state.log_lines.clear();
             state.metrics.clear();
             state.backups.clear();
+            state.domains.clear();
+            state.https.clear();
+            state.locks.clear();
             state.rebuild_tree();
         }
 
@@ -114,6 +117,7 @@ impl App {
         crate::workflows::metrics::flush_debounce(&mut self.state);
         crate::workflows::backup::flush_debounce(&mut self.state);
         crate::workflows::local::flush_debounce(&mut self.state);
+        crate::workflows::domains::flush_debounce(&mut self.state);
     }
 
     pub fn save(&mut self) -> Result<()> {
@@ -163,6 +167,7 @@ fn apply_event(state: &mut AppState, ev: JobEvent) {
                 is_backup_mutate,
                 is_site_create,
                 env_mutate_site,
+                edge_target,
                 commit_target,
                 connection_target,
             ) = if let Some(job) = state.jobs.get(&id) {
@@ -187,6 +192,16 @@ fn apply_event(state: &mut AppState, ev: JobEvent) {
                     },
                     _ => None,
                 };
+                let edge_target = match cmd {
+                    Some(
+                        "domain:add" | "domain:remove" | "https:set" | "lock:enable"
+                        | "lock:disable",
+                    ) => match &job.plan.target {
+                        PlanTarget::Env { site, env } => Some((site.clone(), env.clone())),
+                        _ => None,
+                    },
+                    _ => None,
+                };
                 let commit_target = if cmd == Some("env:commit") {
                     match &job.plan.target {
                         PlanTarget::Env { site, env } => Some((site.clone(), env.clone())),
@@ -206,6 +221,7 @@ fn apply_event(state: &mut AppState, ev: JobEvent) {
                     matches!(cmd, Some("backup:create" | "backup:restore")),
                     cmd == Some("site:create"),
                     env_mutate_site,
+                    edge_target,
                     commit_target,
                     connection_target,
                 )
@@ -243,6 +259,7 @@ fn apply_event(state: &mut AppState, ev: JobEvent) {
             crate::workflows::backup::clear_inflight(state, &kind);
             crate::workflows::local::clear_inflight(state, &kind);
             crate::workflows::create::clear_inflight(state, &kind);
+            crate::workflows::domains::clear_inflight(state, &kind);
             match &status {
                 JobStatus::Succeeded { .. } => {
                     if !kind.quiet() {
@@ -270,6 +287,9 @@ fn apply_event(state: &mut AppState, ev: JobEvent) {
                     }
                     if let Some(site) = &env_mutate_site {
                         crate::workflows::multidev::on_env_mutate(state, site);
+                    }
+                    if let Some((site, env)) = &edge_target {
+                        crate::workflows::domains::on_edge_mutate(state, site, env);
                     }
                     if let Some((site, env)) = &commit_target {
                         crate::workflows::deploy::on_commit_done(state, site, env);
@@ -382,6 +402,15 @@ fn apply_inventory_result(state: &mut AppState, kind: &JobKind, stdout: &str) {
         JobKind::LandoInfo { site } => crate::workflows::local::apply_info(state, site, stdout),
         JobKind::CreateOrgList => crate::workflows::create::apply_org_catalog(state, stdout),
         JobKind::CreateUpstreamList => crate::workflows::create::apply_upstream_list(state, stdout),
+        JobKind::DomainList { site, env } => {
+            crate::workflows::domains::apply_domains(state, site, env, stdout)
+        }
+        JobKind::HttpsInfo { site, env } => {
+            crate::workflows::domains::apply_https(state, site, env, stdout)
+        }
+        JobKind::LockInfo { site, env } => {
+            crate::workflows::domains::apply_lock(state, site, env, stdout)
+        }
         _ => {}
     }
 }

@@ -30,7 +30,10 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
                 | Modal::TagAdd { .. }
                 | Modal::SiteCreate { .. }
                 | Modal::MultidevCreate { .. }
-                | Modal::CloneContent { .. },
+                | Modal::CloneContent { .. }
+                | Modal::DomainAdd { .. }
+                | Modal::HttpsSet { .. }
+                | Modal::LockEnable { .. },
         )
     );
 
@@ -566,6 +569,219 @@ fn handle_modal(state: &mut AppState, key: KeyEvent, modal: Modal) -> Result<boo
             }
             _ => {
                 state.modal = Some(Modal::DiffstatDirty { site, env, files });
+            }
+        },
+        Modal::DomainAdd {
+            site,
+            env,
+            mut value,
+        } => match key.code {
+            KeyCode::Esc => state.modal = None,
+            KeyCode::Enter => {
+                crate::workflows::domains::submit_domain_add(state, site, env, value);
+            }
+            KeyCode::Backspace => {
+                value.pop();
+                state.modal = Some(Modal::DomainAdd { site, env, value });
+            }
+            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                value.push(c);
+                state.modal = Some(Modal::DomainAdd { site, env, value });
+            }
+            _ => {
+                state.modal = Some(Modal::DomainAdd { site, env, value });
+            }
+        },
+        Modal::DomainRemove {
+            site,
+            env,
+            domains,
+            mut selected,
+        } => match key.code {
+            KeyCode::Esc => state.modal = None,
+            KeyCode::Enter => {
+                if let Some(domain) = domains.get(selected).cloned() {
+                    crate::workflows::domains::submit_domain_remove(state, site, env, domain);
+                }
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                if !domains.is_empty() {
+                    selected = (selected + 1).min(domains.len() - 1);
+                }
+                state.modal = Some(Modal::DomainRemove {
+                    site,
+                    env,
+                    domains,
+                    selected,
+                });
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                selected = selected.saturating_sub(1);
+                state.modal = Some(Modal::DomainRemove {
+                    site,
+                    env,
+                    domains,
+                    selected,
+                });
+            }
+            _ => {
+                state.modal = Some(Modal::DomainRemove {
+                    site,
+                    env,
+                    domains,
+                    selected,
+                });
+            }
+        },
+        Modal::HttpsSet {
+            site,
+            env,
+            mut cert,
+            key: mut key_path,
+            mut intermediate,
+            mut focus,
+        } => match key.code {
+            KeyCode::Esc => state.modal = None,
+            KeyCode::Enter => {
+                crate::workflows::domains::submit_https_set(
+                    state,
+                    site,
+                    env,
+                    cert,
+                    key_path,
+                    intermediate,
+                );
+            }
+            KeyCode::Tab => {
+                focus = if key.modifiers.contains(KeyModifiers::SHIFT) {
+                    (focus + 2) % 3
+                } else {
+                    (focus + 1) % 3
+                };
+                state.modal = Some(Modal::HttpsSet {
+                    site,
+                    env,
+                    cert,
+                    key: key_path,
+                    intermediate,
+                    focus,
+                });
+            }
+            KeyCode::BackTab => {
+                focus = (focus + 2) % 3;
+                state.modal = Some(Modal::HttpsSet {
+                    site,
+                    env,
+                    cert,
+                    key: key_path,
+                    intermediate,
+                    focus,
+                });
+            }
+            KeyCode::Backspace => {
+                match focus {
+                    0 => {
+                        cert.pop();
+                    }
+                    1 => {
+                        key_path.pop();
+                    }
+                    _ => {
+                        intermediate.pop();
+                    }
+                }
+                state.modal = Some(Modal::HttpsSet {
+                    site,
+                    env,
+                    cert,
+                    key: key_path,
+                    intermediate,
+                    focus,
+                });
+            }
+            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                match focus {
+                    0 => cert.push(c),
+                    1 => key_path.push(c),
+                    _ => intermediate.push(c),
+                }
+                state.modal = Some(Modal::HttpsSet {
+                    site,
+                    env,
+                    cert,
+                    key: key_path,
+                    intermediate,
+                    focus,
+                });
+            }
+            _ => {
+                state.modal = Some(Modal::HttpsSet {
+                    site,
+                    env,
+                    cert,
+                    key: key_path,
+                    intermediate,
+                    focus,
+                });
+            }
+        },
+        Modal::LockEnable {
+            site,
+            env,
+            mut username,
+            mut password,
+            mut focus,
+        } => match key.code {
+            KeyCode::Esc => state.modal = None,
+            KeyCode::Enter => {
+                crate::workflows::domains::submit_lock_enable(state, site, env, username, password);
+            }
+            KeyCode::Tab | KeyCode::BackTab => {
+                focus = 1 - focus;
+                state.modal = Some(Modal::LockEnable {
+                    site,
+                    env,
+                    username,
+                    password,
+                    focus,
+                });
+            }
+            KeyCode::Backspace => {
+                if focus == 0 {
+                    username.pop();
+                } else {
+                    password.pop();
+                }
+                state.modal = Some(Modal::LockEnable {
+                    site,
+                    env,
+                    username,
+                    password,
+                    focus,
+                });
+            }
+            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                if focus == 0 {
+                    username.push(c);
+                } else {
+                    password.push(c);
+                }
+                state.modal = Some(Modal::LockEnable {
+                    site,
+                    env,
+                    username,
+                    password,
+                    focus,
+                });
+            }
+            _ => {
+                state.modal = Some(Modal::LockEnable {
+                    site,
+                    env,
+                    username,
+                    password,
+                    focus,
+                });
             }
         },
         Modal::Error { .. } => {

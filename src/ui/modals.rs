@@ -330,6 +330,163 @@ pub fn draw_site_create(f: &mut Frame, theme: &Theme, area: Rect, form: &SiteCre
     f.render_widget(p, area);
 }
 
+pub fn draw_domain_add(f: &mut Frame, theme: &Theme, area: Rect, value: &str) {
+    let p = Paragraph::new(vec![
+        Line::from(Span::styled(
+            "Add domain",
+            theme.modal_header.add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("domain  ", theme.modal_label),
+            Span::styled(value.to_string(), theme.input_text_focus),
+        ]),
+        Line::from(""),
+        Line::from("Enter add   Esc cancel"),
+    ])
+    .wrap(Wrap { trim: false })
+    .block(
+        Block::default()
+            .title("domain:add")
+            .borders(Borders::ALL)
+            .border_style(theme.input_border_focus)
+            .style(theme.modal),
+    );
+    f.render_widget(p, area);
+}
+
+pub fn draw_domain_remove(
+    f: &mut Frame,
+    theme: &Theme,
+    area: Rect,
+    domains: &[String],
+    selected: usize,
+) {
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "Remove domain (Destructive)",
+            theme.modal_header.add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+    ];
+    for (i, d) in domains.iter().enumerate() {
+        let marker = if i == selected { "> " } else { "  " };
+        let style = if i == selected {
+            theme.active_label
+        } else {
+            theme.modal_text
+        };
+        lines.push(Line::from(Span::styled(format!("{marker}{d}"), style)));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from("Enter remove   Esc cancel"));
+    let p = Paragraph::new(lines).wrap(Wrap { trim: false }).block(
+        Block::default()
+            .title("domain:remove")
+            .borders(Borders::ALL)
+            .border_style(theme.error)
+            .style(theme.modal),
+    );
+    f.render_widget(p, area);
+}
+
+pub fn draw_https_set(
+    f: &mut Frame,
+    theme: &Theme,
+    area: Rect,
+    cert: &str,
+    key: &str,
+    intermediate: &str,
+    focus: u8,
+) {
+    let path_line = |focused: bool, label: &str, path: &str| {
+        let marker = if focused { ">" } else { " " };
+        Line::from(vec![
+            Span::styled(format!("{marker} {label:<8}"), theme.modal_label),
+            Span::styled(path.to_string(), theme.file),
+        ])
+    };
+    let lines = vec![
+        Line::from(Span::styled(
+            "Set HTTPS (certificate file paths, not contents)",
+            theme.modal_header.add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        path_line(focus == 0, "cert", cert),
+        path_line(focus == 1, "key", key),
+        path_line(focus == 2, "chain", intermediate),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Tab fields  Enter set  Esc cancel",
+            theme.secondary,
+        )),
+    ];
+    let p = Paragraph::new(lines).wrap(Wrap { trim: false }).block(
+        Block::default()
+            .title("https:set")
+            .borders(Borders::ALL)
+            .border_style(theme.input_border_focus)
+            .style(theme.modal),
+    );
+    f.render_widget(p, area);
+}
+
+pub fn draw_lock_enable(
+    f: &mut Frame,
+    theme: &Theme,
+    area: Rect,
+    username: &str,
+    password: &str,
+    focus: u8,
+) {
+    let masked: String = "•".repeat(password.chars().count());
+    let user_style = if focus == 0 {
+        theme.input_text_focus
+    } else {
+        theme.modal_text
+    };
+    let pass_style = if focus == 1 {
+        theme.input_text_focus
+    } else {
+        theme.modal_text
+    };
+    let lines = vec![
+        Line::from(Span::styled(
+            "Enable HTTP basic auth",
+            theme.modal_header.add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "password is redacted in preview and the job log",
+            theme.warning_style,
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(
+                if focus == 0 { "> user  " } else { "  user  " },
+                theme.modal_label,
+            ),
+            Span::styled(username.to_string(), user_style),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                if focus == 1 { "> pass  " } else { "  pass  " },
+                theme.modal_label,
+            ),
+            Span::styled(masked, pass_style),
+        ]),
+        Line::from(""),
+        Line::from("Tab fields  Enter enable  Esc cancel"),
+    ];
+    let p = Paragraph::new(lines).wrap(Wrap { trim: false }).block(
+        Block::default()
+            .title("lock:enable")
+            .borders(Borders::ALL)
+            .border_style(theme.input_border_focus)
+            .style(theme.modal),
+    );
+    f.render_widget(p, area);
+}
+
 pub fn draw_multidev_create(
     f: &mut Frame,
     theme: &Theme,
