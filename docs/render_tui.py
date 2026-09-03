@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""Render capture_demo JSON frames to SVG + PNG (no Pillow; uses rsvg-convert)."""
+"""Render capture_demo JSON frames to SVG + PNG (no Pillow; uses rsvg-convert).
+
+Refresh tutorial shots from the repo root after a UI change:
+
+    cargo run --offline --example capture_demo -- docs/images
+    python3 docs/render_tui.py docs/images
+
+See docs/README.md for the scene list. Commit PNGs only.
+"""
 
 from __future__ import annotations
 

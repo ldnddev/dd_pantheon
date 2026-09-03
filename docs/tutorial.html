@@ -160,6 +160,7 @@
         <li><a href="#lando">Local Lando</a></li>
         <li><a href="#config">Config files</a></li>
         <li><a href="#safety">Safety</a></li>
+        <li><a href="#shots">Refresh these screenshots</a></li>
       </ol>
     </nav>
     <article id="content">
@@ -201,9 +202,8 @@ cargo run -- --root /path/to/site</code></pre>
         The choice is saved in config. Default is this classic stack.
       </p>
       <p>
-        Screenshots on this page are captured from that demo app
-        (<code>cargo run --example capture_demo</code>, then
-        <code>python3 docs/render_tui.py docs/images</code>).
+        Screenshots on this page are captured from that demo app. After a UI
+        change, refresh them (see <a href="#shots">Refresh these screenshots</a>).
       </p>
 
       <h2 id="chrome">Chrome and keys</h2>
@@ -379,6 +379,21 @@ cargo run -- --root /path/to/site</code></pre>
       <p>
         When you are ready to leave demo, drop <code>--demo</code>, log in, and keep
         watching the preview. The command is the product.
+      </p>
+
+      <h2 id="shots">Refresh these screenshots</h2>
+      <p>
+        Do not hand-edit the PNGs. Recapture from the live <code>--demo</code>
+        widgets after any change to fixtures, chrome, layouts, or the modals on
+        this page. From the repo root:
+      </p>
+<pre><code>cargo run --offline --example capture_demo -- docs/images
+python3 docs/render_tui.py docs/images</code></pre>
+      <p>
+        The first command writes JSON cell grids (gitignored). The second needs
+        <code>rsvg-convert</code> and writes <code>docs/images/demo-*.png</code>
+        — commit those. Scene list and when to recapture:
+        <a href="README.md">docs/README.md</a>.
       </p>
     </article>
   </main>

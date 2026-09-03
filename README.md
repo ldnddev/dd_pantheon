@@ -12,4 +12,18 @@ cargo run -- --root ~/sites/acme-wp
 
 Quit is always `Ctrl+Q`. Bare `q` does not quit. Wipe has no `W` key.
 
+## Refresh tutorial screenshots
+
+Any change to demo fixtures, layout, chrome, or the modals shown in the tutorial
+must recapture the PNGs. From the repo root:
+
+```sh
+cargo run --offline --example capture_demo -- docs/images
+python3 docs/render_tui.py docs/images
+```
+
+Requires `rsvg-convert` (librsvg) for the PNG step. JSON/SVG intermediates are
+gitignored; commit the updated `docs/images/demo-*.png` files. Full notes:
+[docs/README.md](docs/README.md).
+
 License: MIT

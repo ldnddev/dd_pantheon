@@ -1,9 +1,13 @@
 //! Render `--demo` frames to JSON cell grids for docs screenshots.
 //!
+//! Recapture after UI/fixture changes (see `docs/README.md`):
+//!
 //! ```sh
 //! cargo run --offline --example capture_demo -- docs/images
 //! python3 docs/render_tui.py docs/images
 //! ```
+//!
+//! Commit the PNGs only. JSON/SVG are gitignored.
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
