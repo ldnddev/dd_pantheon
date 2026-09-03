@@ -1,4 +1,6 @@
 pub mod auth;
+pub mod backup;
+pub mod domains;
 pub mod inventory;
 pub mod metrics;
 pub mod tags;
@@ -9,21 +11,38 @@ use crate::safety;
 use crate::state::{AppState, Modal, TreeSel};
 use crate::toast::ToastLevel;
 
-pub fn stage_action(state: &mut AppState, action_id: &str) {
+pub fn stage_action(state: &mut AppState, action_id: &str) -> bool {
     match action_id {
-        "backup" | "b" => stage_backup(state),
-        "cache" | "c" => stage_cache(state),
+        "backup" | "b" => backup::stage_create(state),
+        "cache" | "c" => domains::stage_clear_cache(state),
+        "wake" => domains::stage_wake(state),
         "deploy" | "e" => stage_deploy(state),
         "lando-start" | "s" => stage_lando(state, "start"),
         "lando-stop" | "S" => stage_lando(state, "stop"),
-        "login" => stage_login(state),
+        "login" => {
+            stage_login(state);
+            false
+        }
         "cms" | "m" => {
             state.show_toast(ToastLevel::Info, "CMS form lands in PR 13");
+            false
         }
-        "n" => state.show_toast(ToastLevel::Info, "site create lands in PR 10"),
-        "a" => tags::open_add(state),
-        "r" => inventory::refresh(state),
-        other => state.show_toast(ToastLevel::Warning, format!("unknown action: {other}")),
+        "n" => {
+            state.show_toast(ToastLevel::Info, "site create lands in PR 10");
+            false
+        }
+        "a" => {
+            tags::open_add(state);
+            false
+        }
+        "r" => {
+            inventory::refresh(state);
+            false
+        }
+        other => {
+            state.show_toast(ToastLevel::Warning, format!("unknown action: {other}"));
+            false
+        }
     }
 }
 
@@ -43,46 +62,10 @@ fn env_target(state: &AppState) -> Option<PlanTarget> {
     }
 }
 
-fn stage_backup(state: &mut AppState) {
+fn stage_deploy(state: &mut AppState) -> bool {
     let Some(target) = env_target(state) else {
         state.show_toast(ToastLevel::Warning, "select an environment");
-        return;
-    };
-    let site_env = target.label();
-    let plan = crate::tools::terminus::plan(
-        state.tools.terminus_path(),
-        vec![
-            "backup:create".into(),
-            site_env.clone(),
-            "--element=all".into(),
-        ],
-        format!("backup {site_env}"),
-        SafetyTier::Mutating,
-        target,
-    );
-    state.current = Some(StagedPlan::One(plan));
-}
-
-fn stage_cache(state: &mut AppState) {
-    let Some(target) = env_target(state) else {
-        state.show_toast(ToastLevel::Warning, "select an environment");
-        return;
-    };
-    let site_env = target.label();
-    let plan = crate::tools::terminus::plan(
-        state.tools.terminus_path(),
-        vec!["env:clear-cache".into(), site_env.clone()],
-        format!("clear caches on {site_env}"),
-        SafetyTier::Mutating,
-        target,
-    );
-    state.current = Some(StagedPlan::One(plan));
-}
-
-fn stage_deploy(state: &mut AppState) {
-    let Some(target) = env_target(state) else {
-        state.show_toast(ToastLevel::Warning, "select an environment");
-        return;
+        return false;
     };
     let site_env = target.label();
     let live = matches!(&target, PlanTarget::Env { env, .. } if env == "live");
@@ -125,7 +108,7 @@ fn stage_deploy(state: &mut AppState) {
             },
             step: 0,
         });
-        return;
+        return true;
     }
     let plan = crate::tools::terminus::plan(
         state.tools.terminus_path(),
@@ -135,16 +118,17 @@ fn stage_deploy(state: &mut AppState) {
         target,
     );
     state.current = Some(StagedPlan::One(plan));
+    true
 }
 
-fn stage_lando(state: &mut AppState, cmd: &str) {
+fn stage_lando(state: &mut AppState, cmd: &str) -> bool {
     let Some(site) = state.selected_site() else {
         state.show_toast(ToastLevel::Warning, "select a site");
-        return;
+        return false;
     };
     let Some(local) = site.local.as_ref() else {
         state.show_toast(ToastLevel::Warning, "no local path bound");
-        return;
+        return false;
     };
     let target = PlanTarget::Local {
         path: local.path.clone(),
@@ -158,6 +142,7 @@ fn stage_lando(state: &mut AppState, cmd: &str) {
         target,
     );
     state.current = Some(StagedPlan::One(plan));
+    true
 }
 
 fn stage_login(state: &mut AppState) {

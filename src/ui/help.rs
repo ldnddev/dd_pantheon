@@ -23,7 +23,12 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect, scroll: u16) {
     lines.push(line("h/l", "Expand / collapse"));
     lines.push(line("g / G", "Top / bottom"));
     lines.push(line("Enter", "Expand site / keep env selected"));
-    lines.push(line("r", "Refresh inventory + metrics (live)"));
+    lines.push(line("r", "Refresh inventory + metrics + backups (live)"));
+    lines.push(line("b", "Stage backup:create (env row; Enter runs)"));
+    lines.push(line(
+        "c",
+        "Stage env:clear-cache (tree/inspector; not preview)",
+    ));
     lines.push(line("/", "Filter"));
     lines.push(line("T", "Tag filter picker (again clears)"));
     lines.push(line("a", "Add tag"));
@@ -32,7 +37,7 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect, scroll: u16) {
 
     push_header(&mut lines, state, "Inspector");
     lines.push(line("j/k", "Move Actions / scroll"));
-    lines.push(line("Enter", "Stage action (demo: no spawn)"));
+    lines.push(line("Enter", "Stage action (demo: no spawn); wake is here"));
     lines.push(line("1-4", "C tabs: Info Metrics Local Actions"));
     lines.push(line(
         "d / w / Shift+M",
@@ -46,6 +51,7 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect, scroll: u16) {
         "Run plan (gates apply). --demo never spawns user plans",
     ));
     lines.push(line("y", "Copy redacted argv (preview focus)"));
+    lines.push(line("c", "no-op in preview (not copy, not clear-cache)"));
     lines.push(line("j/k", "Scroll"));
 
     push_header(&mut lines, state, "Mouse");

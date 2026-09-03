@@ -1,6 +1,6 @@
 use crate::models::{
-    ConnectionMode, Env, Framework, LocalApp, MetricsPeriod, MetricsPoint, MetricsSeries, OrgRef,
-    Site, SiteOverlay, Tag,
+    Backup, ConnectionMode, Env, Framework, LocalApp, MetricsPeriod, MetricsPoint, MetricsSeries,
+    OrgRef, Site, SiteOverlay, Tag,
 };
 use crate::plan::{CommandPlan, PlanTarget, SafetyTier, StagedPlan, ToolKind};
 use std::collections::HashMap;
@@ -11,6 +11,7 @@ pub struct DemoData {
     pub sites: Vec<Site>,
     pub envs: HashMap<String, Vec<Env>>,
     pub metrics: HashMap<(String, MetricsPeriod), MetricsSeries>,
+    pub backups: HashMap<String, Vec<Backup>>,
     pub plan: StagedPlan,
     pub log_lines: Vec<String>,
 }
@@ -148,10 +149,15 @@ pub fn demo_data() -> DemoData {
         }
     }
 
+    let mut backups = HashMap::new();
+    backups.insert("acme-wp.test".into(), dummy_backups("acme-wp", "test"));
+    backups.insert("acme-wp.live".into(), dummy_backups("acme-wp", "live"));
+
     DemoData {
         sites: vec![acme_wp, acme_d10, frozen_lab],
         envs,
         metrics,
+        backups,
         plan: StagedPlan::One(dummy_backup_plan("acme-wp", "test")),
         log_lines: vec![
             "[12:01:03] Created backup_20260831_acme-wp_test.tgz".into(),
@@ -181,6 +187,25 @@ fn env(site: &str, id: &str, mode: ConnectionMode, locked: bool) -> Env {
         drush_version: None,
         created: None,
     }
+}
+
+pub fn dummy_backups(site: &str, env: &str) -> Vec<Backup> {
+    vec![
+        Backup {
+            file: format!("backup_20260831_{site}_{env}_all.tgz"),
+            size: "48.2M".into(),
+            date: "2026-08-31 12:01:03".into(),
+            expiry: "2027-08-31".into(),
+            initiator: "manual".into(),
+        },
+        Backup {
+            file: format!("backup_20260824_{site}_{env}_database.tgz"),
+            size: "12.0M".into(),
+            date: "2026-08-24 09:00:00".into(),
+            expiry: "2027-08-24".into(),
+            initiator: "automated".into(),
+        },
+    ]
 }
 
 pub fn dummy_backup_plan(site: &str, env: &str) -> CommandPlan {

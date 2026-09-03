@@ -44,6 +44,7 @@ impl App {
             state.current = None;
             state.log_lines.clear();
             state.metrics.clear();
+            state.backups.clear();
             state.rebuild_tree();
         }
 
@@ -115,6 +116,7 @@ impl App {
         crate::workflows::inventory::flush_debounce(&mut self.state);
         crate::workflows::tags::flush_debounce(&mut self.state);
         crate::workflows::metrics::flush_debounce(&mut self.state);
+        crate::workflows::backup::flush_debounce(&mut self.state);
     }
 
     pub fn save(&mut self) -> Result<()> {
@@ -153,21 +155,30 @@ fn apply_event(state: &mut AppState, ev: JobEvent) {
             status,
             stdout_raw: _,
         } => {
-            let (kind, stdout, plan_safety, slot, expects_json, is_login, is_tag_mutate) =
-                if let Some(job) = state.jobs.get(&id) {
-                    let cmd = job.plan.argv.first().map(|a| a.as_str());
-                    (
-                        job.kind.clone(),
-                        job.stdout_raw.clone(),
-                        job.plan.safety,
-                        job.plan.target.mutating_slot(),
-                        job.plan.expects_json,
-                        cmd == Some("auth:login"),
-                        matches!(cmd, Some("tag:add" | "tag:remove" | "tag:rm")),
-                    )
-                } else {
-                    return;
-                };
+            let (
+                kind,
+                stdout,
+                plan_safety,
+                slot,
+                expects_json,
+                is_login,
+                is_tag_mutate,
+                is_backup_mutate,
+            ) = if let Some(job) = state.jobs.get(&id) {
+                let cmd = job.plan.argv.first().map(|a| a.as_str());
+                (
+                    job.kind.clone(),
+                    job.stdout_raw.clone(),
+                    job.plan.safety,
+                    job.plan.target.mutating_slot(),
+                    job.plan.expects_json,
+                    cmd == Some("auth:login"),
+                    matches!(cmd, Some("tag:add" | "tag:remove" | "tag:rm")),
+                    matches!(cmd, Some("backup:create" | "backup:restore")),
+                )
+            } else {
+                return;
+            };
             if let Some(job) = state.jobs.get_mut(&id) {
                 job.status = status.clone();
                 if expects_json {
@@ -196,6 +207,7 @@ fn apply_event(state: &mut AppState, ev: JobEvent) {
             }
             crate::workflows::inventory::clear_inflight(state, &kind);
             crate::workflows::metrics::clear_inflight(state, &kind);
+            crate::workflows::backup::clear_inflight(state, &kind);
             match &status {
                 JobStatus::Succeeded { .. } => {
                     if !kind.quiet() {
@@ -214,6 +226,9 @@ fn apply_event(state: &mut AppState, ev: JobEvent) {
                     }
                     if is_tag_mutate {
                         crate::workflows::tags::on_tag_mutate_done(state);
+                    }
+                    if is_backup_mutate {
+                        crate::workflows::backup::refresh_selected(state);
                     }
                     advance_workflow(state);
                 }
@@ -307,6 +322,9 @@ fn apply_inventory_result(state: &mut AppState, kind: &JobKind, stdout: &str) {
         }
         JobKind::Metrics { site, env, period } => {
             crate::workflows::metrics::apply_metrics(state, site, env, period, stdout)
+        }
+        JobKind::BackupList { site, env } => {
+            crate::workflows::backup::apply_list(state, site, env, stdout)
         }
         _ => {}
     }

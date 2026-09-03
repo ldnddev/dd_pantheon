@@ -3,7 +3,7 @@ use crate::config::ConfigStore;
 use crate::fixtures::{DemoData, dummy_backup_plan};
 use crate::jobs::{Job, JobHub, JobId};
 use crate::models::{
-    ActionItem, Env, InspectorTab, LayoutId, MetricsPeriod, MetricsSeries, OrgRef, Site,
+    ActionItem, Backup, Env, InspectorTab, LayoutId, MetricsPeriod, MetricsSeries, OrgRef, Site,
     default_actions,
 };
 use crate::plan::{CommandPlan, StagedPlan, ToolKind};
@@ -159,6 +159,7 @@ pub struct AppState {
     pub current: Option<StagedPlan>,
     pub metrics: HashMap<(String, MetricsPeriod), MetricsSeries>,
     pub metrics_period: MetricsPeriod,
+    pub backups: HashMap<String, Vec<Backup>>,
 
     pub config: ConfigStore,
     pub should_quit: bool,
@@ -181,6 +182,7 @@ pub struct AppState {
     pub pending_org_list: Option<(String, Instant)>,
     pub pending_tag_list: Option<(String, String, Instant)>,
     pub pending_metrics: Option<(String, String, Instant)>,
+    pub pending_backup_list: Option<(String, String, Instant)>,
     pub metrics_error: Option<String>,
     pub period_hits: Vec<PeriodHit>,
     pub org_prompted: HashSet<String>,
@@ -235,6 +237,7 @@ impl AppState {
             current: Some(data.plan),
             metrics: data.metrics,
             metrics_period: config.config.metrics_period,
+            backups: data.backups,
             config,
             should_quit: false,
             last_frame: Rect::default(),
@@ -254,6 +257,7 @@ impl AppState {
             pending_org_list: None,
             pending_tag_list: None,
             pending_metrics: None,
+            pending_backup_list: None,
             metrics_error: None,
             period_hits: Vec::new(),
             org_prompted: HashSet::new(),
@@ -386,6 +390,7 @@ impl AppState {
             crate::workflows::inventory::on_selection_changed(self);
             crate::workflows::tags::on_selection_changed(self);
             crate::workflows::metrics::on_selection_changed(self);
+            crate::workflows::backup::on_selection_changed(self);
         }
         self.persist_selection();
     }
@@ -472,6 +477,17 @@ impl AppState {
                 .get(site)
                 .and_then(|envs| envs.iter().find(|e| e.id == *env)),
             _ => None,
+        }
+    }
+
+    pub fn selected_backups(&self) -> &[Backup] {
+        match &self.selected {
+            TreeSel::Env { site, env } => self
+                .backups
+                .get(&format!("{site}.{env}"))
+                .map(|v| v.as_slice())
+                .unwrap_or(&[]),
+            _ => &[],
         }
     }
 

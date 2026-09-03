@@ -1,5 +1,6 @@
 use crate::plan::{CommandPlan, PlanTarget, SafetyTier, ToolKind};
 use std::path::PathBuf;
+use std::time::Duration;
 
 #[derive(Debug, Clone)]
 pub struct SafetyBlock {
@@ -57,7 +58,7 @@ pub fn backup_first(terminus: PathBuf, target: &PlanTarget) -> Vec<CommandPlan> 
         PlanTarget::Site { site } => format!("{site}.dev"),
         _ => return vec![],
     };
-    let create = crate::tools::terminus::plan(
+    let mut create = crate::tools::terminus::plan(
         terminus.clone(),
         vec![
             "backup:create".into(),
@@ -68,6 +69,7 @@ pub fn backup_first(terminus: PathBuf, target: &PlanTarget) -> Vec<CommandPlan> 
         SafetyTier::Mutating,
         target.clone(),
     );
+    create.timeout = Some(Duration::from_secs(600));
     let mut list = crate::tools::terminus::plan(
         terminus,
         vec![

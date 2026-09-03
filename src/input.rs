@@ -522,8 +522,8 @@ fn shared_action_keys(state: &mut AppState, code: KeyCode) {
         KeyCode::Char('r') => "r",
         _ => return,
     };
-    crate::workflows::stage_action(state, id);
-    if !matches!(id, "r" | "n" | "m" | "a" | "cms") {
+    let staged = crate::workflows::stage_action(state, id);
+    if staged && !matches!(id, "r" | "n" | "m" | "a" | "cms") {
         crate::workflows::request_run(state);
     }
 }

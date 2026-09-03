@@ -274,6 +274,15 @@ pub enum CacheLevel {
 }
 
 #[derive(Clone, Debug)]
+pub struct Backup {
+    pub file: String,
+    pub size: String,
+    pub date: String,
+    pub expiry: String,
+    pub initiator: String,
+}
+
+#[derive(Clone, Debug)]
 pub struct ActionItem {
     pub id: &'static str,
     pub label: &'static str,
@@ -284,6 +293,14 @@ pub fn default_actions() -> Vec<ActionItem> {
         ActionItem {
             id: "backup",
             label: "backup",
+        },
+        ActionItem {
+            id: "cache",
+            label: "clear cache",
+        },
+        ActionItem {
+            id: "wake",
+            label: "wake",
         },
         ActionItem {
             id: "deploy",

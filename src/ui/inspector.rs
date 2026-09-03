@@ -171,6 +171,30 @@ fn draw_info(f: &mut Frame, state: &mut AppState, area: Rect) {
         if let Some(created) = &env.created {
             lines.push(kv(state, "created", created));
         }
+        let backup_rows: Vec<(String, String, String, String)> = state
+            .selected_backups()
+            .iter()
+            .take(5)
+            .map(|b| {
+                (
+                    b.file.clone(),
+                    b.size.clone(),
+                    b.date.clone(),
+                    b.expiry.clone(),
+                )
+            })
+            .collect();
+        if backup_rows.is_empty() {
+            lines.push(kv(state, "backups", "none yet"));
+        } else {
+            lines.push(kv(state, "backups", &format!("{}", backup_rows.len())));
+            for (file, size, date, expiry) in backup_rows {
+                lines.push(Line::from(Span::styled(
+                    format!("  {file}  {size}  {date}  exp {expiry}"),
+                    state.theme.secondary,
+                )));
+            }
+        }
     } else if matches!(state.selected, crate::state::TreeSel::Site(_)) {
         lines.push(Line::from(Span::styled(
             "select an environment for metrics",

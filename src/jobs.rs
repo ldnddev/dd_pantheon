@@ -63,6 +63,10 @@ pub enum JobKind {
         env: String,
         period: String,
     },
+    BackupList {
+        site: String,
+        env: String,
+    },
 }
 
 impl JobKind {
@@ -78,6 +82,7 @@ impl JobKind {
                 | Self::OrgList { .. }
                 | Self::TagList { .. }
                 | Self::Metrics { .. }
+                | Self::BackupList { .. }
         )
     }
 }

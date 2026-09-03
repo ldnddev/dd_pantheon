@@ -318,6 +318,19 @@ mod tests {
     }
 
     #[test]
+    fn mutating_slot_none_is_global() {
+        assert_eq!(PlanTarget::None.mutating_slot(), "__global__");
+        assert_eq!(
+            PlanTarget::Env {
+                site: "acme-wp".into(),
+                env: "test".into(),
+            }
+            .mutating_slot(),
+            "acme-wp.test"
+        );
+    }
+
+    #[test]
     fn redact_machine_token_flag() {
         let plan = CommandPlan {
             tool: ToolKind::Terminus,
