@@ -1,2 +1,4 @@
 /target
 **/*.rs.bk
+docs/images/*.json
+docs/images/*.svg

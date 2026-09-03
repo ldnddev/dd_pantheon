@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>dd_pantheon tutorial — setup and daily use</title>
+  <meta name="description" content="Install dd_pantheon, run the --demo layout lab, log in with a machine token, and run Terminus and Lando from a preview-first cockpit.">
+  <style>
+    :root {
+      --bg: #0f1114;
+      --body: #2a2d31;
+      --modal: #1c1e21;
+      --text: #f5f6f7;
+      --muted: #9ea3aa;
+      --label: #ffaf46;
+      --focus: #64b4f5;
+      --ok: #82e0aa;
+      --warn: #f5c469;
+      --err: #e57373;
+      --link: #ffa087;
+      --max: 52rem;
+    }
+    * { box-sizing: border-box; }
+    html { color-scheme: dark; scroll-behavior: smooth; }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+    }
+    body {
+      margin: 0;
+      font: 1.05rem/1.55 system-ui, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    a { color: var(--focus); }
+    a:hover { color: var(--link); }
+    a:focus-visible, button:focus-visible, kbd:focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 2px;
+    }
+    .skip {
+      position: absolute;
+      left: -999px;
+      top: 0;
+      background: var(--focus);
+      color: var(--bg);
+      padding: 0.5rem 1rem;
+    }
+    .skip:focus { left: 0.5rem; top: 0.5rem; z-index: 10; }
+    header, main, footer { max-width: calc(var(--max) + 18rem); margin: 0 auto; padding: 1.25rem 1.25rem; }
+    header {
+      border-bottom: 1px solid #3a3e44;
+    }
+    header p.lede { color: var(--muted); max-width: var(--max); }
+    .wrap {
+      display: grid;
+      grid-template-columns: 14rem minmax(0, 1fr);
+      gap: 2rem;
+      align-items: start;
+    }
+    @media (max-width: 800px) {
+      .wrap { grid-template-columns: 1fr; }
+      nav.toc { position: static; }
+    }
+    nav.toc {
+      position: sticky;
+      top: 1rem;
+      font-size: 0.92rem;
+    }
+    nav.toc h2 { font-size: 0.8rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--label); }
+    nav.toc ol { padding-left: 1.2rem; color: var(--muted); }
+    nav.toc a { color: var(--text); text-decoration: none; }
+    nav.toc a:hover { color: var(--focus); text-decoration: underline; }
+    article { max-width: var(--max); }
+    h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 0.5rem; }
+    h2 { font-size: 1.35rem; color: var(--focus); margin-top: 2.25rem; }
+    h3 { font-size: 1.08rem; color: var(--label); }
+    kbd {
+      font: 0.85em/1.4 ui-monospace, "JetBrains Mono", monospace;
+      background: var(--modal);
+      border: 1px solid #5a5f66;
+      border-bottom-width: 2px;
+      border-radius: 4px;
+      padding: 0.05em 0.4em;
+      color: var(--text);
+    }
+    pre, code {
+      font-family: ui-monospace, "JetBrains Mono", monospace;
+      font-size: 0.92em;
+    }
+    pre {
+      background: var(--modal);
+      border: 1px solid #3a3e44;
+      border-radius: 6px;
+      padding: 0.9rem 1rem;
+      overflow-x: auto;
+      color: var(--text);
+    }
+    figure {
+      margin: 1.25rem 0 1.75rem;
+      background: var(--modal);
+      border: 1px solid #3a3e44;
+      border-radius: 8px;
+      padding: 0.5rem;
+    }
+    figure img {
+      display: block;
+      width: 100%;
+      height: auto;
+      border-radius: 4px;
+    }
+    figcaption {
+      color: var(--muted);
+      font-size: 0.9rem;
+      padding: 0.55rem 0.35rem 0.2rem;
+    }
+    .callout {
+      border-left: 4px solid var(--warn);
+      background: var(--modal);
+      padding: 0.85rem 1rem;
+      margin: 1.25rem 0;
+    }
+    .callout.danger { border-left-color: var(--err); }
+    .callout.info { border-left-color: var(--focus); }
+    .callout.ok { border-left-color: var(--ok); }
+    .callout h3 { margin-top: 0; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+    th, td { text-align: left; padding: 0.45rem 0.5rem; border-bottom: 1px solid #3a3e44; vertical-align: top; }
+    th { color: var(--label); font-weight: 600; }
+    footer {
+      border-top: 1px solid #3a3e44;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    ul.keys { padding-left: 1.2rem; }
+  </style>
+</head>
+<body>
+  <a class="skip" href="#content">Skip to content</a>
+  <header>
+    <p style="color:var(--label);margin:0 0 0.35rem;font-size:0.85rem;letter-spacing:0.06em;text-transform:uppercase;">ldnddev · dd_pantheon</p>
+    <h1>Setup and daily use</h1>
+    <p class="lede">
+      dd_pantheon is a terminal cockpit for Pantheon WordPress and Drupal sites.
+      It never calls the Pantheon HTTP API. Every action is a
+      <code>terminus</code>, <code>lando</code>, or <code>git</code> command
+      you can see before it runs.
+    </p>
+  </header>
+  <main class="wrap">
+    <nav class="toc" aria-label="On this page">
+      <h2>On this page</h2>
+      <ol>
+        <li><a href="#install">Install</a></li>
+        <li><a href="#demo">First run: --demo</a></li>
+        <li><a href="#chrome">Chrome and keys</a></li>
+        <li><a href="#login">Login</a></li>
+        <li><a href="#loop">The daily loop</a></li>
+        <li><a href="#deploy">Deploy and LiveGate</a></li>
+        <li><a href="#cms">CMS form and palette</a></li>
+        <li><a href="#lando">Local Lando</a></li>
+        <li><a href="#config">Config files</a></li>
+        <li><a href="#safety">Safety</a></li>
+      </ol>
+    </nav>
+    <article id="content">
+      <h2 id="install">Install</h2>
+      <p>
+        You need a Unix machine (Linux is the v1 target), a Rust toolchain
+        (edition 2024), and the CLIs you actually run against Pantheon:
+      </p>
+      <ul>
+        <li><code>terminus</code> 4.3.2 or compatible, on <code>PATH</code></li>
+        <li><code>lando</code> if you work locally (v3.26.x)</li>
+        <li><code>git</code> for git-mode deploys</li>
+      </ul>
+      <p>From a clone of this repo:</p>
+<pre><code>cargo run -- --demo
+cargo run
+cargo run -- --root /path/to/site</code></pre>
+      <p>
+        Missing Terminus is not fatal: the app still starts, the tree is empty,
+        login is disabled, and <kbd>F4</kbd> still cycles layouts. Same idea if
+        Lando or Git is missing — those workflows hide or skip.
+      </p>
+
+      <h2 id="demo">First run: <code>--demo</code></h2>
+      <p>
+        Start here. Demo loads three dummy sites (WordPress, Drupal, a frozen lab),
+        fake metrics, and a staged backup plan. It <strong>never spawns</strong>
+        your user plans. Enter toasts <code>demo: no spawn</code>.
+      </p>
+      <figure>
+        <img src="images/demo-cockpit.png" width="1264" height="712" alt="dd_pantheon demo cockpit. Header shows DEMO. Site tree on the left with acme-wp.test selected. Inspector shows WordPress tags, a cache gauge at 93 percent, and an actions list. Preview shows terminus backup:create acme-wp.test --element=all --yes. Job log has dummy backup lines.">
+        <figcaption>
+          Classic stack in <code>--demo</code>: tree, inspector, always-on preview, job log.
+          The <code>DEMO</code> badge uses the warning color on purpose.
+        </figcaption>
+      </figure>
+      <p>
+        Use <kbd>F4</kbd> to try the other two body layouts (three-column, tabbed inspector).
+        The choice is saved in config. Default is this classic stack.
+      </p>
+      <p>
+        Screenshots on this page are captured from that demo app
+        (<code>cargo run --example capture_demo</code>, then
+        <code>python3 docs/render_tui.py docs/images</code>).
+      </p>
+
+      <h2 id="chrome">Chrome and keys</h2>
+      <p>
+        Header is three lines. Footer is one line, always starting
+        <kbd>F1:Help</kbd> then <kbd>F2:Theme</kbd> then quit.
+        Quit is <kbd>Ctrl+Q</kbd> even inside a text field. Bare <kbd>q</kbd> does not quit.
+      </p>
+      <figure>
+        <img src="images/demo-help.png" width="1264" height="712" alt="F1 Help modal listing global keys: F1 Help, F2 Theme, F3 Doctor, F4 cycle layout, Ctrl+Q quit, colon for palette, Ctrl+L login, and tree keys including backup, deploy, and CMS.">
+        <figcaption><kbd>F1</kbd> is the in-app cheat sheet. This HTML page does not try to replace it.</figcaption>
+      </figure>
+      <ul class="keys">
+        <li><kbd>Tab</kbd> / <kbd>Shift+Tab</kbd> — tree → inspector → preview → log</li>
+        <li><kbd>j</kbd>/<kbd>k</kbd> — move or scroll in the focused pane</li>
+        <li><kbd>F3</kbd> — doctor (tool paths, versions, whoami, catalog count)</li>
+        <li><kbd>Ctrl+C</kbd> — cancel the running job’s process group</li>
+      </ul>
+
+      <h2 id="login">Login</h2>
+      <p>
+        Open the login modal with <kbd>Ctrl+L</kbd>, F3, or the Actions row
+        <em>Login</em>. Paste a Pantheon machine token.
+      </p>
+      <div class="callout danger">
+        <h3>The token is visible in <code>ps</code></h3>
+        <p>
+          Terminus 4.3.2 has no <code>TERMINUS_MACHINE_TOKEN</code> env of its own.
+          Spawn is <code>terminus auth:login --machine-token=…</code> in argv.
+          Preview and the job log redact it. Config, theme, and
+          <code>sites.toml</code> never store it. If
+          <code>TERMINUS_MACHINE_TOKEN</code> is already in your shell, the modal
+          can use it — that is a TUI convenience, not a Terminus feature.
+        </p>
+      </div>
+      <p>
+        Logged-out whoami (exit 0, empty stdout) is a normal launch state, not a parse bug.
+        After login, inventory auto-fills. Logout is Mutating: it replaces the Login action
+        while you are signed in.
+      </p>
+
+      <h2 id="loop">The daily loop</h2>
+      <ol>
+        <li>Select a site, expand it, pick an environment (<kbd>j</kbd>/<kbd>k</kbd>, <kbd>h</kbd>/<kbd>l</kbd>).</li>
+        <li>Read the preview. It always shows the redacted shell line, cwd, why, and safety badge.</li>
+        <li>Press <kbd>Enter</kbd> in preview (or after staging from the tree) to run.</li>
+      </ol>
+      <p>Safety badges:</p>
+      <table>
+        <thead>
+          <tr><th>Badge</th><th>What happens</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>READ-ONLY</td><td>Inventory/metrics auto-run. Palette ReadOnly still waits for Enter.</td></tr>
+          <tr><td>MUTATING</td><td>Preview + Enter. No extra modal. One mutating job per env slot.</td></tr>
+          <tr><td>DESTRUCTIVE</td><td>Confirm modal repeats argv, target, and why. Enter or <kbd>y</kbd>.</td></tr>
+          <tr><td>LIVEGATE</td><td>Type the gate word. <kbd>y</kbd> is a character, not confirm.</td></tr>
+        </tbody>
+      </table>
+      <p>
+        Inventory ReadOnly (site list, env list, tags, env metrics) auto-runs with a 150&nbsp;ms debounce
+        so the cockpit is usable. The preview still shows those argv while they fire.
+      </p>
+
+      <h2 id="deploy">Deploy and LiveGate</h2>
+      <p>
+        <kbd>e</kbd> on <strong>dev / multidev</strong> is git-mode: dirty
+        <code>env:diffstat</code> blocks <code>connection:set git</code>, then
+        <code>git push</code> + <code>workflow:wait --max=600</code>.
+      </p>
+      <p>
+        On <strong>test</strong> and <strong>live</strong>, <kbd>e</kbd> opens a note form.
+        Test offers <code>--sync-content</code> (backup-first when checked). Live never syncs content.
+        Drupal gets <code>--updatedb</code>.
+      </p>
+      <figure>
+        <img src="images/demo-deploy.png" width="1264" height="712" alt="Deploy to test modal. Note field reads Deploy from dd_pantheon. Sync-content is checked with a backup-first hint. Updatedb is unchecked. Footer says Tab fields, Enter deploy, Esc cancel.">
+        <figcaption>Test deploy form. Default note is <code>Deploy from dd_pantheon</code>. Unchecking sync-content skips the backup-first prefix.</figcaption>
+      </figure>
+      <figure>
+        <img src="images/demo-livegate.png" width="1264" height="712" alt="LiveGate modal titled type: live. Shows terminus env:deploy acme-wp.live --cc --note=Deploy from dd_pantheon --no-interaction --yes. Hint: Esc cancel. y is a character, not confirm. Input labeled type gate word.">
+        <figcaption>
+          Live deploy asks you to type <kbd>live</kbd>. A Lando DB push asks for
+          <kbd>database</kbd> even if the dest is live — one word, not two.
+        </figcaption>
+      </figure>
+
+      <h2 id="cms">CMS form and palette</h2>
+      <p>
+        <kbd>m</kbd> is always the CMS form, never “month”. Metrics month is
+        <kbd>Shift+M</kbd>. One form: remote (Terminus) or local (Lando), wp or drush,
+        then the command after <code>--</code>.
+      </p>
+      <figure>
+        <img src="images/demo-cms.png" width="1264" height="712" alt="CMS command modal. Target local, cms wp, empty command field focused. History lists plugin list, core version, and status. Never auto-inserts -y.">
+        <figcaption>
+          Demo defaults to local because acme-wp’s fixture Lando app is marked running.
+          History lives in config (last 50). Wipe-class CMS (<code>sql-drop</code>,
+          <code>site-install</code>) is Destructive. The form never auto-inserts
+          <code>-y</code> into the CMS argv.
+        </figcaption>
+      </figure>
+      <p>
+        <kbd>:</kbd> or <kbd>Ctrl+K</kbd> opens the command palette over the discovered
+        Terminus catalog and Lando tasks. Known dangerous names route into the same
+        <code>plan_*</code> constructors as the first-class keys. The palette
+        <strong>stages only</strong> — you still press Enter in preview to run.
+      </p>
+      <figure>
+        <img src="images/demo-palette.png" width="1264" height="712" alt="Command palette filtered to wipe. Query wipe. Highlighted match env:wipe, description Wipe an environment database and files. Second match remote:wp. Footer: type to filter, arrows, Enter form, Esc.">
+        <figcaption>
+          Fuzzy subsequence match, no extra crate. Wipe has <strong>no <kbd>W</kbd> key</strong>.
+          Use this palette or the Actions row “Wipe environment…”. Both call backup-first
+          <code>plan_wipe</code>.
+        </figcaption>
+      </figure>
+
+      <h2 id="lando">Local Lando</h2>
+      <p>
+        Bind a project with <code>--root /path/to/site</code> (needs a
+        <code>.lando.yml</code>, or it still binds the path). Resolution order:
+        <code>sites.toml</code> <code>local_path</code> → config
+        <code>[locals]</code> → <code>--root</code>.
+      </p>
+      <ul>
+        <li><kbd>s</kbd> / <kbd>S</kbd> — start / stop</li>
+        <li>Actions — rebuild and destroy (Destructive), pull (Destructive; overwrites local DB), code-only push (Mutating)</li>
+        <li>DB push is LiveGate: type <kbd>database</kbd></li>
+      </ul>
+      <p>
+        If the recipe is not <code>pantheon</code>, pull/push hide; global Lando still works.
+        Creating a site with “bind local” runs <code>site:create</code> then
+        <code>local:clone --site_dir=…</code>.
+      </p>
+
+      <h2 id="config">Config files</h2>
+      <table>
+        <thead>
+          <tr><th>Path</th><th>What</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>~/.config/ldnddev/dd_pantheon/config.toml</code></td>
+            <td>Layout, last site/env, org ids, history, <code>[locals]</code>. No secrets.</td>
+          </tr>
+          <tr>
+            <td><code>~/.config/ldnddev/dd_pantheon/sites.toml</code></td>
+            <td>Optional overlay: cms, <code>multidev_ok</code>, git branch, local path.</td>
+          </tr>
+          <tr>
+            <td><code>./dd_pantheon_theme.yml</code> then <code>~/.config/ldnddev/dd_pantheon_theme.yml</code></td>
+            <td>Visual-standard theme. Not nested in the app config dir. <code>version: 1</code> only.</td>
+          </tr>
+          <tr>
+            <td><code>~/.local/state/ldnddev/dd_pantheon/app.log</code></td>
+            <td>Optional debug log when <code>debug_log = true</code> or <code>RUST_LOG</code> is set. Redacted argv only.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h2 id="safety">Safety</h2>
+      <div class="callout ok">
+        <h3>Hard rules the TUI will not let you skip</h3>
+        <ul>
+          <li>No silent <code>--yes</code>. The runner injects it only after a TUI confirm.</li>
+          <li>One mutating job per slot (<code>site.env</code>, local path, or global).</li>
+          <li>Backup before clone-content, restore, wipe, and test <code>--sync-content</code>.</li>
+          <li>Dirty <code>env:diffstat</code> blocks <code>connection:set git</code>.</li>
+          <li>Palette is not a safety bypass. Unrouted names warn <code>raw palette — no backup-first / diffstat</code>.</li>
+          <li>Preview-focused <kbd>y</kbd> copies the <em>redacted</em> line (<code>wl-copy</code> / <code>xclip</code>).</li>
+        </ul>
+      </div>
+      <p>
+        When you are ready to leave demo, drop <code>--demo</code>, log in, and keep
+        watching the preview. The command is the product.
+      </p>
+    </article>
+  </main>
+  <footer>
+    <p>dd_pantheon · MIT · Screenshots from <code>--demo</code> fixtures, not a live Pantheon session.</p>
+  </footer>
+</body>
+</html>
