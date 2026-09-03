@@ -350,12 +350,15 @@ pub fn refresh(state: &mut AppState) {
     crate::workflows::tags::refresh_selected(state);
     crate::workflows::metrics::refresh_selected(state);
     crate::workflows::backup::refresh_selected(state);
+    crate::workflows::local::refresh_selected(state);
 }
 
 pub fn apply_site_list(state: &mut AppState, json: &str) {
     match parse_site_list(json) {
         Ok(sites) => {
+            let old = crate::workflows::local::snapshot_locals(state);
             state.sites = sites;
+            crate::workflows::local::reattach(state, old);
             restore_selection(state);
             state.rebuild_tree();
             state.select_matching_row();

@@ -71,6 +71,10 @@ pub enum JobKind {
         site: String,
         env: String,
     },
+    LandoList,
+    LandoInfo {
+        site: String,
+    },
 }
 
 impl JobKind {
@@ -87,6 +91,8 @@ impl JobKind {
                 | Self::TagList { .. }
                 | Self::Metrics { .. }
                 | Self::BackupList { .. }
+                | Self::LandoList
+                | Self::LandoInfo { .. }
         )
     }
 }

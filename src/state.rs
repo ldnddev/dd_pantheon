@@ -3,8 +3,8 @@ use crate::config::ConfigStore;
 use crate::fixtures::{DemoData, dummy_backup_plan};
 use crate::jobs::{Job, JobHub, JobId};
 use crate::models::{
-    ActionItem, Backup, Env, InspectorTab, LayoutId, MetricsPeriod, MetricsSeries, OrgRef, Site,
-    default_actions,
+    ActionItem, Backup, Env, InspectorTab, LayoutId, LocalApp, MetricsPeriod, MetricsSeries,
+    OrgRef, Site, default_actions,
 };
 use crate::plan::{CommandPlan, StagedPlan, ToolKind};
 use crate::theme::{Theme, ThemeStatus};
@@ -188,6 +188,8 @@ pub struct AppState {
     pub pending_tag_list: Option<(String, String, Instant)>,
     pub pending_metrics: Option<(String, String, Instant)>,
     pub pending_backup_list: Option<(String, String, Instant)>,
+    pub pending_lando: Option<Instant>,
+    pub pending_local: Option<LocalApp>,
     pub metrics_error: Option<String>,
     pub period_hits: Vec<PeriodHit>,
     pub org_prompted: HashSet<String>,
@@ -263,6 +265,8 @@ impl AppState {
             pending_tag_list: None,
             pending_metrics: None,
             pending_backup_list: None,
+            pending_lando: None,
+            pending_local: None,
             metrics_error: None,
             period_hits: Vec::new(),
             org_prompted: HashSet::new(),
@@ -280,6 +284,7 @@ impl AppState {
         state.rebuild_tree();
         state.select_matching_row();
         state.action_state.select(Some(0));
+        crate::workflows::local::refresh_actions(&mut state);
         state
     }
 
@@ -389,6 +394,7 @@ impl AppState {
             },
             None => TreeSel::Site(row.site.clone()),
         };
+        crate::workflows::local::on_selection_changed(self);
         if self.demo {
             self.sync_dummy_plan();
         } else {

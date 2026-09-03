@@ -57,11 +57,7 @@ impl App {
         }
 
         if let Some(root) = &opts.root {
-            if let Some(site) = state.sites.iter_mut().find(|s| s.name == "acme-wp") {
-                if let Some(local) = site.local.as_mut() {
-                    local.path = root.clone();
-                }
-            }
+            workflows::local::bind_root(&mut state, root);
         }
 
         if !opts.skip_detect {
@@ -117,6 +113,7 @@ impl App {
         crate::workflows::tags::flush_debounce(&mut self.state);
         crate::workflows::metrics::flush_debounce(&mut self.state);
         crate::workflows::backup::flush_debounce(&mut self.state);
+        crate::workflows::local::flush_debounce(&mut self.state);
     }
 
     pub fn save(&mut self) -> Result<()> {
@@ -225,6 +222,7 @@ fn apply_event(state: &mut AppState, ev: JobEvent) {
             crate::workflows::inventory::clear_inflight(state, &kind);
             crate::workflows::metrics::clear_inflight(state, &kind);
             crate::workflows::backup::clear_inflight(state, &kind);
+            crate::workflows::local::clear_inflight(state, &kind);
             match &status {
                 JobStatus::Succeeded { .. } => {
                     if !kind.quiet() {
@@ -354,6 +352,8 @@ fn apply_inventory_result(state: &mut AppState, kind: &JobKind, stdout: &str) {
         JobKind::Diffstat { site, env } => {
             crate::workflows::deploy::apply_diffstat(state, site, env, stdout)
         }
+        JobKind::LandoList => crate::workflows::local::apply_list(state, stdout),
+        JobKind::LandoInfo { site } => crate::workflows::local::apply_info(state, site, stdout),
         _ => {}
     }
 }

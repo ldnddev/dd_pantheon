@@ -33,6 +33,7 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect, scroll: u16) {
         "c",
         "Stage env:clear-cache (tree/inspector; not preview)",
     ));
+    lines.push(line("s / S", "lando start / stop (local bound)"));
     lines.push(line("/", "Filter"));
     lines.push(line("T", "Tag filter picker (again clears)"));
     lines.push(line("a", "Add tag"));

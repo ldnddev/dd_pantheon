@@ -21,6 +21,9 @@ pub struct AppConfig {
     /// Last-picked org **id** (UUID) per terminus site name.
     #[serde(default)]
     pub orgs: HashMap<String, String>,
+    /// Fallback local path bindings (site name → path).
+    #[serde(default)]
+    pub locals: HashMap<String, String>,
 }
 
 impl Default for AppConfig {
@@ -31,6 +34,7 @@ impl Default for AppConfig {
             last_env: None,
             metrics_period: MetricsPeriod::Day,
             orgs: HashMap::new(),
+            locals: HashMap::new(),
         }
     }
 }

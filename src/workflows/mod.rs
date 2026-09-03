@@ -3,11 +3,12 @@ pub mod backup;
 pub mod deploy;
 pub mod domains;
 pub mod inventory;
+pub mod local;
 pub mod metrics;
 pub mod tags;
 
 use crate::jobs::{self, JobKind};
-use crate::plan::{PlanTarget, SafetyTier, StagedPlan};
+use crate::plan::{SafetyTier, StagedPlan};
 use crate::safety;
 use crate::state::{AppState, Modal};
 use crate::toast::ToastLevel;
@@ -18,8 +19,16 @@ pub fn stage_action(state: &mut AppState, action_id: &str) -> bool {
         "cache" | "c" => domains::stage_clear_cache(state),
         "wake" => domains::stage_wake(state),
         "deploy" | "e" => deploy::stage_deploy(state),
-        "lando-start" | "s" => stage_lando(state, "start"),
-        "lando-stop" | "S" => stage_lando(state, "stop"),
+        "lando-start" | "s" => local::stage_start(state),
+        "lando-stop" | "S" => local::stage_stop(state),
+        "lando-restart" => local::stage_restart(state),
+        "lando-logs" => local::stage_logs(state),
+        "lando-rebuild" => local::stage_rebuild(state),
+        "lando-destroy" => local::stage_destroy(state),
+        "lando-pull" => local::stage_pull(state),
+        "lando-push" => local::stage_push(state, false),
+        "lando-push-db" => local::stage_push(state, true),
+        "lando-poweroff" => local::stage_poweroff(state),
         "login" => {
             stage_login(state);
             false
@@ -45,30 +54,6 @@ pub fn stage_action(state: &mut AppState, action_id: &str) -> bool {
             false
         }
     }
-}
-
-fn stage_lando(state: &mut AppState, cmd: &str) -> bool {
-    let Some(site) = state.selected_site() else {
-        state.show_toast(ToastLevel::Warning, "select a site");
-        return false;
-    };
-    let Some(local) = site.local.as_ref() else {
-        state.show_toast(ToastLevel::Warning, "no local path bound");
-        return false;
-    };
-    let target = PlanTarget::Local {
-        path: local.path.clone(),
-        site: Some(site.name.clone()),
-    };
-    let plan = crate::tools::lando::plan(
-        state.tools.lando_path(),
-        vec![cmd.into()],
-        format!("lando {cmd} in {}", local.path.display()),
-        SafetyTier::Mutating,
-        target,
-    );
-    state.current = Some(StagedPlan::One(plan));
-    true
 }
 
 fn stage_login(state: &mut AppState) {
@@ -300,13 +285,19 @@ pub fn start_doctor_jobs(state: &mut AppState) {
 
 pub fn cancel_jobs(state: &mut AppState) {
     let mut any = false;
+    let mut lando = false;
     for job in state.jobs.values() {
         if job.status.is_live() {
+            if job.plan.tool == crate::plan::ToolKind::Lando {
+                lando = true;
+            }
             jobs::request_cancel(job);
             any = true;
         }
     }
     if !any {
         state.show_toast(ToastLevel::Info, "no job to cancel");
+    } else if lando {
+        state.show_toast(ToastLevel::Warning, "if containers still run: lando stop");
     }
 }

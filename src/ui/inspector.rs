@@ -239,9 +239,23 @@ fn draw_local(f: &mut Frame, state: &AppState, area: Rect) {
         if let Some(url) = &local.url {
             lines.push(kv(state, "url", url));
         }
+        let pantheon = local
+            .recipe
+            .as_deref()
+            .is_some_and(|r| r.eq_ignore_ascii_case("pantheon"));
+        if local.recipe.is_some() && !pantheon {
+            lines.push(Line::from(Span::styled(
+                "recipe is not pantheon — pull/push hidden",
+                state.theme.warning_style,
+            )));
+        }
+        lines.push(Line::from(Span::styled(
+            "s start  S stop  · pull/push/rebuild in Actions",
+            state.theme.secondary,
+        )));
     } else {
         lines.push(Line::from(Span::styled(
-            "no local path bound",
+            "no local path bound  · --root <path> to bind",
             state.theme.secondary,
         )));
     }
