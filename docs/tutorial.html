@@ -174,7 +174,26 @@
         <li><code>lando</code> if you work locally (v3.26.x)</li>
         <li><code>git</code> for git-mode deploys</li>
       </ul>
-      <p>From a clone of this repo:</p>
+      <p>
+        Install the app with <code>install.sh</code> from a clone of this repo.
+        That builds a release binary and copies it to
+        <code>~/.local/bin/dd_pantheon</code> (override with
+        <code>PREFIX</code> or <code>BINDIR</code>). If no theme file exists yet,
+        it also installs <code>dd_pantheon_theme.yml</code> next to the other
+        ldnddev themes — not inside the app config dir.
+      </p>
+<pre><code>./install.sh
+dd_pantheon --demo
+dd_pantheon
+dd_pantheon --root /path/to/site
+./install.sh uninstall</code></pre>
+      <p>
+        Uninstall removes the binary and the default theme file. It does
+        <em>not</em> delete <code>~/.config/ldnddev/dd_pantheon/</code> (layout,
+        history, sites overlay). If <code>~/.local/bin</code> is missing from
+        <code>PATH</code>, the script prints the export line to add.
+      </p>
+      <p>From a clone without installing (dev loop):</p>
 <pre><code>cargo run -- --demo
 cargo run
 cargo run -- --root /path/to/site</code></pre>

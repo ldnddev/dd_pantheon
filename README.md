@@ -2,6 +2,18 @@
 
 A guided operations cockpit for Pantheon-hosted WordPress and Drupal sites. It never talks to the Pantheon HTTP API. Every remote or local action is a `terminus`, `lando`, or `git` subprocess, shown as a `CommandPlan` before anything is spawned.
 
+Install the binary onto your PATH (default `~/.local/bin`):
+
+```sh
+./install.sh                 # release build → ~/.local/bin/dd_pantheon
+dd_pantheon --demo
+dd_pantheon
+dd_pantheon --root ~/sites/acme-wp
+./install.sh uninstall       # removes the binary + default theme, not app config
+```
+
+From a clone without installing:
+
 ```sh
 cargo run -- --demo          # layout lab, dummy sites, no spawn
 cargo run                    # live Terminus session
