@@ -1,5 +1,5 @@
 use crate::models::InspectorTab;
-use crate::state::{AppState, FocusPane, Modal};
+use crate::state::{AppState, CreateField, FocusPane, Modal};
 use crate::toast::ToastLevel;
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -27,7 +27,8 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
             Modal::Filter { .. }
                 | Modal::Login { .. }
                 | Modal::LiveGate { .. }
-                | Modal::TagAdd { .. },
+                | Modal::TagAdd { .. }
+                | Modal::SiteCreate { .. },
         )
     );
 
@@ -357,6 +358,9 @@ fn handle_modal(state: &mut AppState, key: KeyEvent, modal: Modal) -> Result<boo
                 });
             }
         },
+        Modal::SiteCreate { mut form } => {
+            handle_site_create(state, key, &mut form);
+        }
         Modal::DiffstatDirty { site, env, files } => match key.code {
             KeyCode::Esc => state.modal = None,
             KeyCode::Enter | KeyCode::Char('c') => {
@@ -384,6 +388,85 @@ fn handle_modal(state: &mut AppState, key: KeyEvent, modal: Modal) -> Result<boo
         },
     }
     Ok(false)
+}
+
+fn handle_site_create(
+    state: &mut AppState,
+    key: KeyEvent,
+    form: &mut crate::state::SiteCreateForm,
+) {
+    match key.code {
+        KeyCode::Esc => {
+            state.modal = None;
+            return;
+        }
+        KeyCode::Enter => {
+            crate::workflows::create::submit(state, form.clone());
+            return;
+        }
+        KeyCode::Tab => {
+            form.focus = if key.modifiers.contains(KeyModifiers::SHIFT) {
+                form.focus.prev()
+            } else {
+                form.focus.next()
+            };
+        }
+        KeyCode::BackTab => form.focus = form.focus.prev(),
+        KeyCode::Char('j') | KeyCode::Down if matches!(form.focus, CreateField::Org) => {
+            if !form.orgs.is_empty() {
+                form.org_idx = (form.org_idx + 1).min(form.orgs.len() - 1);
+            }
+        }
+        KeyCode::Char('k') | KeyCode::Up if matches!(form.focus, CreateField::Org) => {
+            form.org_idx = form.org_idx.saturating_sub(1);
+        }
+        KeyCode::Char('j') | KeyCode::Down if matches!(form.focus, CreateField::Upstream) => {
+            if !form.upstreams.is_empty() {
+                form.upstream_idx = (form.upstream_idx + 1).min(form.upstreams.len() - 1);
+            }
+        }
+        KeyCode::Char('k') | KeyCode::Up if matches!(form.focus, CreateField::Upstream) => {
+            form.upstream_idx = form.upstream_idx.saturating_sub(1);
+        }
+        KeyCode::Char(' ') if matches!(form.focus, CreateField::Bind) => {
+            form.bind_local = !form.bind_local;
+        }
+        KeyCode::Backspace
+            if matches!(
+                form.focus,
+                CreateField::Name | CreateField::Label | CreateField::Path
+            ) =>
+        {
+            match form.focus {
+                CreateField::Name => {
+                    form.name.pop();
+                }
+                CreateField::Label => {
+                    form.label.pop();
+                }
+                CreateField::Path => {
+                    form.local_path.pop();
+                }
+                _ => {}
+            }
+        }
+        KeyCode::Char(c)
+            if !key.modifiers.contains(KeyModifiers::CONTROL)
+                && matches!(
+                    form.focus,
+                    CreateField::Name | CreateField::Label | CreateField::Path
+                ) =>
+        {
+            match form.focus {
+                CreateField::Name => form.name.push(c),
+                CreateField::Label => form.label.push(c),
+                CreateField::Path => form.local_path.push(c),
+                _ => {}
+            }
+        }
+        _ => {}
+    }
+    state.modal = Some(Modal::SiteCreate { form: form.clone() });
 }
 
 fn handle_tree(state: &mut AppState, key: KeyEvent) -> Result<bool> {
@@ -527,14 +610,14 @@ fn shared_action_keys(state: &mut AppState, code: KeyCode) {
         KeyCode::Char('e') => "deploy",
         KeyCode::Char('s') => "lando-start",
         KeyCode::Char('S') => "lando-stop",
-        KeyCode::Char('n') => "n",
+        KeyCode::Char('n') => "create",
         KeyCode::Char('m') => "cms",
         KeyCode::Char('a') => "a",
         KeyCode::Char('r') => "r",
         _ => return,
     };
     let staged = crate::workflows::stage_action(state, id);
-    if staged && !matches!(id, "r" | "n" | "m" | "a" | "cms") {
+    if staged && !matches!(id, "r" | "n" | "m" | "a" | "cms" | "create") {
         crate::workflows::request_run(state);
     }
 }

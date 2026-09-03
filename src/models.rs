@@ -158,6 +158,24 @@ pub struct OrgRef {
 }
 
 #[derive(Clone, Debug)]
+pub struct UpstreamRef {
+    pub id: String,
+    pub label: String,
+    pub machine_name: String,
+    pub framework: Option<String>,
+}
+
+impl UpstreamRef {
+    pub fn create_id(&self) -> &str {
+        if !self.machine_name.is_empty() {
+            &self.machine_name
+        } else {
+            &self.id
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct LocalApp {
     pub path: PathBuf,
     pub lando_name: Option<String>,
@@ -309,6 +327,10 @@ pub fn default_actions() -> Vec<ActionItem> {
         ActionItem {
             id: "cms",
             label: "CMS",
+        },
+        ActionItem {
+            id: "create",
+            label: "create site",
         },
         ActionItem {
             id: "login",

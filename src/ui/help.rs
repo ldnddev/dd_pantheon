@@ -37,6 +37,7 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect, scroll: u16) {
     lines.push(line("/", "Filter"));
     lines.push(line("T", "Tag filter picker (again clears)"));
     lines.push(line("a", "Add tag"));
+    lines.push(line("n", "Create site wizard (org + name + upstream)"));
     lines.push(line("x", "Remove selected tag chip (inspector)"));
     lines.push(line("[ / ]", "Cycle tag chips (inspector)"));
 

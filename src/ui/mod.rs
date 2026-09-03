@@ -123,6 +123,9 @@ fn draw_modal(f: &mut Frame, state: &mut AppState, area: Rect) {
         Some(Modal::DiffstatDirty { site, env, files }) => {
             modals::draw_diffstat_dirty(f, &state.theme, modal_area, &site, &env, &files);
         }
+        Some(Modal::SiteCreate { form }) => {
+            modals::draw_site_create(f, &state.theme, modal_area, &form);
+        }
         Some(Modal::Filter { query }) => {
             let p = Paragraph::new(format!("/{query}"))
                 .style(state.theme.input_text_focus)

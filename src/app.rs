@@ -161,6 +161,7 @@ fn apply_event(state: &mut AppState, ev: JobEvent) {
                 is_login,
                 is_tag_mutate,
                 is_backup_mutate,
+                is_site_create,
                 commit_target,
                 connection_target,
             ) = if let Some(job) = state.jobs.get(&id) {
@@ -187,6 +188,7 @@ fn apply_event(state: &mut AppState, ev: JobEvent) {
                     cmd == Some("auth:login"),
                     matches!(cmd, Some("tag:add" | "tag:remove" | "tag:rm")),
                     matches!(cmd, Some("backup:create" | "backup:restore")),
+                    cmd == Some("site:create"),
                     commit_target,
                     connection_target,
                 )
@@ -223,6 +225,7 @@ fn apply_event(state: &mut AppState, ev: JobEvent) {
             crate::workflows::metrics::clear_inflight(state, &kind);
             crate::workflows::backup::clear_inflight(state, &kind);
             crate::workflows::local::clear_inflight(state, &kind);
+            crate::workflows::create::clear_inflight(state, &kind);
             match &status {
                 JobStatus::Succeeded { .. } => {
                     if !kind.quiet() {
@@ -244,6 +247,9 @@ fn apply_event(state: &mut AppState, ev: JobEvent) {
                     }
                     if is_backup_mutate {
                         crate::workflows::backup::refresh_selected(state);
+                    }
+                    if is_site_create {
+                        crate::workflows::create::on_created(state);
                     }
                     if let Some((site, env)) = &commit_target {
                         crate::workflows::deploy::on_commit_done(state, site, env);
@@ -354,6 +360,8 @@ fn apply_inventory_result(state: &mut AppState, kind: &JobKind, stdout: &str) {
         }
         JobKind::LandoList => crate::workflows::local::apply_list(state, stdout),
         JobKind::LandoInfo { site } => crate::workflows::local::apply_info(state, site, stdout),
+        JobKind::CreateOrgList => crate::workflows::create::apply_org_catalog(state, stdout),
+        JobKind::CreateUpstreamList => crate::workflows::create::apply_upstream_list(state, stdout),
         _ => {}
     }
 }

@@ -4,7 +4,7 @@ use crate::fixtures::{DemoData, dummy_backup_plan};
 use crate::jobs::{Job, JobHub, JobId};
 use crate::models::{
     ActionItem, Backup, Env, InspectorTab, LayoutId, LocalApp, MetricsPeriod, MetricsSeries,
-    OrgRef, Site, default_actions,
+    OrgRef, Site, UpstreamRef, default_actions,
 };
 use crate::plan::{CommandPlan, StagedPlan, ToolKind};
 use crate::theme::{Theme, ThemeStatus};
@@ -98,10 +98,60 @@ pub enum Modal {
         env: String,
         files: Vec<String>,
     },
+    SiteCreate {
+        form: SiteCreateForm,
+    },
     Error {
         msg: String,
     },
     QuitConfirm,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CreateField {
+    Name,
+    Label,
+    Org,
+    Upstream,
+    Bind,
+    Path,
+}
+
+impl CreateField {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Name => Self::Label,
+            Self::Label => Self::Org,
+            Self::Org => Self::Upstream,
+            Self::Upstream => Self::Bind,
+            Self::Bind => Self::Path,
+            Self::Path => Self::Name,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        match self {
+            Self::Name => Self::Path,
+            Self::Label => Self::Name,
+            Self::Org => Self::Label,
+            Self::Upstream => Self::Org,
+            Self::Bind => Self::Upstream,
+            Self::Path => Self::Bind,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SiteCreateForm {
+    pub name: String,
+    pub label: String,
+    pub orgs: Vec<OrgRef>,
+    pub org_idx: usize,
+    pub upstreams: Vec<UpstreamRef>,
+    pub upstream_idx: usize,
+    pub bind_local: bool,
+    pub local_path: String,
+    pub focus: CreateField,
 }
 
 #[derive(Clone, Debug)]
@@ -190,6 +240,9 @@ pub struct AppState {
     pub pending_backup_list: Option<(String, String, Instant)>,
     pub pending_lando: Option<Instant>,
     pub pending_local: Option<LocalApp>,
+    pub create_orgs: Vec<OrgRef>,
+    pub create_upstreams: Vec<UpstreamRef>,
+    pub pending_create_bind: Option<(String, PathBuf)>,
     pub metrics_error: Option<String>,
     pub period_hits: Vec<PeriodHit>,
     pub org_prompted: HashSet<String>,
@@ -267,6 +320,9 @@ impl AppState {
             pending_backup_list: None,
             pending_lando: None,
             pending_local: None,
+            create_orgs: Vec::new(),
+            create_upstreams: Vec::new(),
+            pending_create_bind: None,
             metrics_error: None,
             period_hits: Vec::new(),
             org_prompted: HashSet::new(),

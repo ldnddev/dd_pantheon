@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod backup;
+pub mod create;
 pub mod deploy;
 pub mod domains;
 pub mod inventory;
@@ -37,8 +38,8 @@ pub fn stage_action(state: &mut AppState, action_id: &str) -> bool {
             state.show_toast(ToastLevel::Info, "CMS form lands in PR 13");
             false
         }
-        "n" => {
-            state.show_toast(ToastLevel::Info, "site create lands in PR 10");
+        "create" | "n" => {
+            create::open(state);
             false
         }
         "a" => {

@@ -1,6 +1,6 @@
 use crate::models::OrgRef;
 use crate::plan::CommandPlan;
-use crate::state::AppState;
+use crate::state::{AppState, CreateField, SiteCreateForm};
 use crate::theme::Theme;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -261,4 +261,84 @@ pub fn draw_tag_picker(f: &mut Frame, theme: &Theme, area: Rect, tags: &[String]
             .style(theme.modal),
     );
     f.render_widget(p, area);
+}
+
+pub fn draw_site_create(f: &mut Frame, theme: &Theme, area: Rect, form: &SiteCreateForm) {
+    let org = form
+        .orgs
+        .get(form.org_idx)
+        .map(|o| o.org_name.as_str())
+        .unwrap_or("(none)");
+    let up = form
+        .upstreams
+        .get(form.upstream_idx)
+        .map(|u| u.label.as_str())
+        .unwrap_or("(none)");
+    let bind = if form.bind_local { "[x]" } else { "[ ]" };
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "Create site",
+            theme.modal_header.add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        field(theme, form.focus == CreateField::Name, "name", &form.name),
+        field(
+            theme,
+            form.focus == CreateField::Label,
+            "label",
+            &form.label,
+        ),
+        field(theme, form.focus == CreateField::Org, "org", org),
+        field(theme, form.focus == CreateField::Upstream, "upstream", up),
+        field(
+            theme,
+            form.focus == CreateField::Bind,
+            "bind",
+            &format!("{bind} local path"),
+        ),
+        field(
+            theme,
+            form.focus == CreateField::Path,
+            "path",
+            &form.local_path,
+        ),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Tab fields  j/k org/upstream  Space bind  Enter create  Esc",
+            theme.secondary,
+        )),
+    ];
+    if form.orgs.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "loading orgs… or none available",
+            theme.warning_style,
+        )));
+    }
+    if form.upstreams.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "loading upstreams… or none available",
+            theme.warning_style,
+        )));
+    }
+    let p = Paragraph::new(lines).wrap(Wrap { trim: false }).block(
+        Block::default()
+            .title("site:create")
+            .borders(Borders::ALL)
+            .border_style(theme.input_border_focus)
+            .style(theme.modal),
+    );
+    f.render_widget(p, area);
+}
+
+fn field<'a>(theme: &'a Theme, focused: bool, key: &str, value: &str) -> Line<'a> {
+    let marker = if focused { ">" } else { " " };
+    let style = if focused {
+        theme.input_text_focus
+    } else {
+        theme.modal_text
+    };
+    Line::from(vec![
+        Span::styled(format!("{marker} {key:<9}"), theme.modal_label),
+        Span::styled(value.to_string(), style),
+    ])
 }

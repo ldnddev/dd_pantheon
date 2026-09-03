@@ -75,6 +75,8 @@ pub enum JobKind {
     LandoInfo {
         site: String,
     },
+    CreateOrgList,
+    CreateUpstreamList,
 }
 
 impl JobKind {
@@ -93,6 +95,8 @@ impl JobKind {
                 | Self::BackupList { .. }
                 | Self::LandoList
                 | Self::LandoInfo { .. }
+                | Self::CreateOrgList
+                | Self::CreateUpstreamList
         )
     }
 }
