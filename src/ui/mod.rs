@@ -209,6 +209,14 @@ fn draw_modal(f: &mut Frame, state: &mut AppState, area: Rect) {
         Some(Modal::Cms { form }) => {
             modals::draw_cms(f, &state.theme, modal_area, &form);
         }
+        Some(Modal::BackupPick {
+            files,
+            selected,
+            kind,
+            ..
+        }) => {
+            modals::draw_backup_pick(f, &state.theme, modal_area, &files, selected, kind);
+        }
         Some(Modal::Filter { query }) => {
             let p = Paragraph::new(format!("/{query}"))
                 .style(state.theme.input_text_focus)

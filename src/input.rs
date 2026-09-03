@@ -786,6 +786,51 @@ fn handle_modal(state: &mut AppState, key: KeyEvent, modal: Modal) -> Result<boo
                 });
             }
         },
+        Modal::BackupPick {
+            site,
+            env,
+            files,
+            mut selected,
+            kind,
+        } => match key.code {
+            KeyCode::Esc => state.modal = None,
+            KeyCode::Enter => {
+                if let Some(file) = files.get(selected).cloned() {
+                    crate::workflows::backup::submit_pick(state, site, env, file, kind);
+                }
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                if !files.is_empty() {
+                    selected = (selected + 1).min(files.len() - 1);
+                }
+                state.modal = Some(Modal::BackupPick {
+                    site,
+                    env,
+                    files,
+                    selected,
+                    kind,
+                });
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                selected = selected.saturating_sub(1);
+                state.modal = Some(Modal::BackupPick {
+                    site,
+                    env,
+                    files,
+                    selected,
+                    kind,
+                });
+            }
+            _ => {
+                state.modal = Some(Modal::BackupPick {
+                    site,
+                    env,
+                    files,
+                    selected,
+                    kind,
+                });
+            }
+        },
         Modal::Palette {
             query,
             selected,

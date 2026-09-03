@@ -1,6 +1,8 @@
 use crate::models::OrgRef;
 use crate::plan::CommandPlan;
-use crate::state::{AppState, CmsFocus, CmsForm, CreateField, PaletteForm, SiteCreateForm};
+use crate::state::{
+    AppState, BackupPickKind, CmsFocus, CmsForm, CreateField, PaletteForm, SiteCreateForm,
+};
 use crate::theme::Theme;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -571,6 +573,52 @@ pub fn draw_clone_content(
             .title("env:clone-content")
             .borders(Borders::ALL)
             .border_style(theme.warning_style)
+            .style(theme.modal),
+    );
+    f.render_widget(p, area);
+}
+
+pub fn draw_backup_pick(
+    f: &mut Frame,
+    theme: &Theme,
+    area: Rect,
+    files: &[String],
+    selected: usize,
+    kind: BackupPickKind,
+) {
+    let destructive = matches!(kind, BackupPickKind::Restore);
+    let mut lines = vec![
+        Line::from(Span::styled(
+            kind.label().to_string(),
+            theme.modal_header.add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+    ];
+    for (i, file) in files.iter().enumerate() {
+        let marker = if i == selected { "> " } else { "  " };
+        let style = if i == selected {
+            theme.active_label
+        } else {
+            theme.modal_text
+        };
+        lines.push(Line::from(Span::styled(format!("{marker}{file}"), style)));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from("j/k select  Enter  Esc cancel"));
+    let border = if destructive {
+        theme.error
+    } else {
+        theme.input_border_focus
+    };
+    let title = match kind {
+        BackupPickKind::Restore => "backup:restore",
+        BackupPickKind::Get => "backup:get",
+    };
+    let p = Paragraph::new(lines).wrap(Wrap { trim: false }).block(
+        Block::default()
+            .title(title)
+            .borders(Borders::ALL)
+            .border_style(border)
             .style(theme.modal),
     );
     f.render_widget(p, area);

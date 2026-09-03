@@ -28,6 +28,10 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect, scroll: u16) {
     lines.push(line("r", "Refresh inventory + metrics + backups (live)"));
     lines.push(line("b", "Stage backup:create (env row; Enter runs)"));
     lines.push(line(
+        "Actions",
+        "Restore backup… / backup URL (get prints URL, no download)",
+    ));
+    lines.push(line(
         "e",
         "Deploy: git-mode on dev, backup-first test, LiveGate live",
     ));

@@ -151,10 +151,32 @@ pub enum Modal {
     Cms {
         form: CmsForm,
     },
+    BackupPick {
+        site: String,
+        env: String,
+        files: Vec<String>,
+        selected: usize,
+        kind: BackupPickKind,
+    },
     Error {
         msg: String,
     },
     QuitConfirm,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BackupPickKind {
+    Restore,
+    Get,
+}
+
+impl BackupPickKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Restore => "Restore backup (Destructive; live is LiveGate)",
+            Self::Get => "Show backup download URL (not saved to disk)",
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

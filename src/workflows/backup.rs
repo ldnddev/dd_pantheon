@@ -1,7 +1,7 @@
 use crate::jobs::JobKind;
-use crate::models::Backup;
+use crate::models::{ActionItem, Backup};
 use crate::plan::{CommandPlan, PlanTarget, SafetyTier, StagedPlan, ToolKind, WorkflowPlan};
-use crate::state::{AppState, AuthState, TreeSel};
+use crate::state::{AppState, AuthState, BackupPickKind, Modal, TreeSel};
 use crate::toast::ToastLevel;
 use crate::workflows::start_job;
 use serde_json::Value;
@@ -312,6 +312,89 @@ pub fn clear_inflight(state: &mut AppState, kind: &JobKind) {
 pub fn refresh_selected(state: &mut AppState) {
     if let TreeSel::Env { site, env } = state.selected.clone() {
         request(state, &site, &env, true);
+    }
+}
+
+pub fn actions(state: &AppState) -> Vec<ActionItem> {
+    if !matches!(state.selected, TreeSel::Env { .. }) {
+        return vec![];
+    }
+    if state.selected_backups().is_empty() {
+        return vec![];
+    }
+    vec![
+        ActionItem {
+            id: "backup-restore",
+            label: "Restore backup…",
+        },
+        ActionItem {
+            id: "backup-get",
+            label: "backup URL",
+        },
+    ]
+}
+
+pub fn open_restore(state: &mut AppState) -> bool {
+    open_pick(state, BackupPickKind::Restore)
+}
+
+pub fn open_get(state: &mut AppState) -> bool {
+    open_pick(state, BackupPickKind::Get)
+}
+
+fn open_pick(state: &mut AppState, kind: BackupPickKind) -> bool {
+    let Some((site, env)) = selected_env(state) else {
+        state.show_toast(ToastLevel::Warning, "select an environment");
+        return false;
+    };
+    let files: Vec<String> = state
+        .selected_backups()
+        .iter()
+        .map(|b| b.file.clone())
+        .collect();
+    if files.is_empty() {
+        state.show_toast(ToastLevel::Warning, "no backups loaded");
+        return false;
+    }
+    state.modal = Some(Modal::BackupPick {
+        site,
+        env,
+        files,
+        selected: 0,
+        kind,
+    });
+    false
+}
+
+pub fn submit_pick(
+    state: &mut AppState,
+    site: String,
+    env: String,
+    file: String,
+    kind: BackupPickKind,
+) {
+    state.modal = None;
+    match kind {
+        BackupPickKind::Restore => {
+            let wf = restore_workflow(
+                state.tools.terminus_path(),
+                &site,
+                &env,
+                Some(file.as_str()),
+            );
+            state.current = Some(StagedPlan::Workflow { plan: wf, step: 0 });
+            crate::workflows::request_run(state);
+        }
+        BackupPickKind::Get => {
+            let plan = plan_get(
+                state.tools.terminus_path(),
+                &site,
+                &env,
+                Some(file.as_str()),
+            );
+            state.current = Some(StagedPlan::One(plan));
+            crate::workflows::request_run(state);
+        }
     }
 }
 

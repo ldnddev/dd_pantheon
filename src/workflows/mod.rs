@@ -54,6 +54,8 @@ pub fn stage_action(state: &mut AppState, action_id: &str) -> bool {
         "multidev-delete" => multidev::stage_delete(state),
         "clone-content" => content::open_clone(state),
         "wipe" => content::stage_wipe(state),
+        "backup-restore" => backup::open_restore(state),
+        "backup-get" => backup::open_get(state),
         "domain-add" => domains::open_domain_add(state),
         "domain-remove" => domains::open_domain_remove(state),
         "https-set" => domains::open_https_set(state),
