@@ -93,6 +93,7 @@ const WORKFLOW_NAMES: &[&str] = &[
     "multidev:merge-to-dev",
     "multidev:merge-from-dev",
     "site:create",
+    "local:clone",
     "site:info",
     "site:list",
     "site:org:list",

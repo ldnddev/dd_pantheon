@@ -1,6 +1,6 @@
 use crate::jobs::JobKind;
 use crate::models::{OrgRef, UpstreamRef};
-use crate::plan::{CommandPlan, PlanTarget, SafetyTier, StagedPlan, ToolKind};
+use crate::plan::{CommandPlan, PlanTarget, SafetyTier, StagedPlan, ToolKind, WorkflowPlan};
 use crate::state::{AppState, AuthState, CreateField, Modal, SiteCreateForm};
 use crate::toast::ToastLevel;
 use crate::workflows::start_job;
@@ -77,6 +77,37 @@ pub fn plan_create(
         safety: SafetyTier::Mutating,
         target: PlanTarget::Site {
             site: name.to_string(),
+        },
+        dry_run: false,
+        timeout: Some(CREATE_TIMEOUT),
+        expects_json: false,
+        extra_env: vec![],
+        redact: vec![],
+        confirm_with_yes: true,
+    }
+}
+
+pub fn plan_local_clone(
+    terminus: PathBuf,
+    site: &str,
+    dest: &PathBuf,
+    branch: &str,
+) -> CommandPlan {
+    CommandPlan {
+        tool: ToolKind::Terminus,
+        binary: terminus,
+        argv: vec![
+            "local:clone".into(),
+            site.into(),
+            format!("--site_dir={}", dest.display()),
+            format!("--branch={branch}"),
+        ],
+        cwd: None,
+        why: format!("clone {site} into {} (Pantheon local copy)", dest.display()),
+        safety: SafetyTier::Mutating,
+        target: PlanTarget::Local {
+            path: dest.clone(),
+            site: Some(site.to_string()),
         },
         dry_run: false,
         timeout: Some(CREATE_TIMEOUT),
@@ -319,50 +350,62 @@ pub fn submit(state: &mut AppState, form: SiteCreateForm) {
         state.modal = Some(Modal::SiteCreate { form });
         return;
     }
-    let plan = plan_create(
+    let create = plan_create(
         state.tools.terminus_path(),
         &name,
         &label,
         up.create_id(),
         &org.org_id,
     );
+    state.modal = None;
     if form.bind_local {
-        state.pending_create_bind = Some((name.clone(), PathBuf::from(form.local_path.trim())));
+        let dest = PathBuf::from(form.local_path.trim());
+        state.pending_create_bind = Some((name.clone(), dest.clone()));
+        let branch = crate::workflows::deploy::git_branch(state, &name);
+        let clone = plan_local_clone(state.tools.terminus_path(), &name, &dest, &branch);
+        state.current = Some(StagedPlan::Workflow {
+            plan: WorkflowPlan {
+                title: format!("create {name} + local clone"),
+                why: format!("site:create then local:clone into {}", dest.display()),
+                safety: SafetyTier::Mutating,
+                steps: vec![create, clone],
+                stop_on_failure: true,
+            },
+            step: 0,
+        });
     } else {
         state.pending_create_bind = None;
+        state.current = Some(StagedPlan::One(create));
     }
-    state.modal = None;
-    state.current = Some(StagedPlan::One(plan));
     crate::workflows::request_run(state);
 }
 
 pub fn on_created(state: &mut AppState) {
     crate::workflows::inventory::request_site_list(state, true);
-    if let Some((name, path)) = state.pending_create_bind.take() {
-        state
-            .config
-            .config
-            .locals
-            .insert(name.clone(), path.display().to_string());
-        state.config.mark_dirty();
-        crate::workflows::local::bind_root(state, &path);
-        if !state
-            .sites
-            .iter()
-            .any(|s| s.name == name && s.local.is_some())
-        {
-            state.pending_local = state.pending_local.clone().or_else(|| {
-                Some(crate::models::LocalApp {
-                    path,
-                    lando_name: None,
-                    recipe: None,
-                    framework: None,
-                    terminus_site: Some(name),
-                    running: None,
-                    url: None,
-                })
-            });
-        }
+}
+
+pub fn on_cloned(state: &mut AppState) {
+    let Some((name, path)) = state.pending_create_bind.take() else {
+        return;
+    };
+    state.config.persist_local_path(&name, &path);
+    crate::workflows::local::bind_root(state, &path);
+    if !state
+        .sites
+        .iter()
+        .any(|s| s.name == name && s.local.is_some())
+    {
+        state.pending_local = state.pending_local.clone().or_else(|| {
+            Some(crate::models::LocalApp {
+                path,
+                lando_name: None,
+                recipe: None,
+                framework: None,
+                terminus_site: Some(name),
+                running: None,
+                url: None,
+            })
+        });
     }
 }
 
@@ -408,5 +451,17 @@ mod tests {
         assert!(!valid_site_name("Acme"));
         assert!(!valid_site_name("1acme"));
         assert!(!valid_site_name("acme_wp"));
+    }
+
+    #[test]
+    fn local_clone_uses_site_dir_not_cwd() {
+        let dest = PathBuf::from("/tmp/acme-new");
+        let plan = plan_local_clone(PathBuf::from("terminus"), "acme-new", &dest, "master");
+        assert_eq!(plan.argv[0], "local:clone");
+        assert_eq!(plan.argv[1], "acme-new");
+        assert!(plan.argv.iter().any(|a| a == "--site_dir=/tmp/acme-new"));
+        assert!(plan.argv.iter().any(|a| a == "--branch=master"));
+        assert_eq!(plan.safety, SafetyTier::Mutating);
+        assert!(plan.cwd.is_none());
     }
 }

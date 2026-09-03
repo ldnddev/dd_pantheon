@@ -184,6 +184,7 @@ fn apply_event(state: &mut AppState, ev: JobEvent) {
                 is_tag_mutate,
                 is_backup_mutate,
                 is_site_create,
+                is_local_clone,
                 env_mutate_site,
                 edge_target,
                 commit_target,
@@ -244,6 +245,7 @@ fn apply_event(state: &mut AppState, ev: JobEvent) {
                     matches!(cmd, Some("tag:add" | "tag:remove" | "tag:rm")),
                     matches!(cmd, Some("backup:create" | "backup:restore")),
                     cmd == Some("site:create"),
+                    cmd == Some("local:clone"),
                     env_mutate_site,
                     edge_target,
                     commit_target,
@@ -308,6 +310,9 @@ fn apply_event(state: &mut AppState, ev: JobEvent) {
                     }
                     if is_site_create {
                         crate::workflows::create::on_created(state);
+                    }
+                    if is_local_clone {
+                        crate::workflows::create::on_cloned(state);
                     }
                     if let Some(site) = &env_mutate_site {
                         crate::workflows::multidev::on_env_mutate(state, site);

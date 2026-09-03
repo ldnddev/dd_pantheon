@@ -476,7 +476,7 @@ pub(crate) fn wants_updatedb(state: &AppState, site: &str) -> bool {
     })
 }
 
-fn git_branch(state: &AppState, site: &str) -> String {
+pub(crate) fn git_branch(state: &AppState, site: &str) -> String {
     state
         .site(site)
         .and_then(|s| s.overlay.as_ref()?.git_branch.clone())
