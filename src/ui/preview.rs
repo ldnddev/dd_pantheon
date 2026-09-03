@@ -55,7 +55,11 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect) {
         ]),
         Line::from(vec![
             Span::styled("why: ", state.theme.label),
-            Span::raw(why),
+            if why.contains("raw palette") {
+                Span::styled(why, state.theme.warning_style)
+            } else {
+                Span::raw(why)
+            },
         ]),
     ];
     if let Some(crate::plan::StagedPlan::Workflow { plan, step }) = &state.current {

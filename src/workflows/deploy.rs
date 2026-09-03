@@ -320,6 +320,23 @@ pub fn request_diffstat(state: &mut AppState, site: &str, env: &str) {
 pub fn apply_diffstat(state: &mut AppState, site: &str, env: &str, json: &str) {
     match parse_diffstat(json) {
         Ok(files) => {
+            if let Some((ps, pe, mode)) = state.pending_connection_set.take() {
+                if files.is_empty() {
+                    match plan_connection_set(state.tools.terminus_path(), &ps, &pe, &mode, false) {
+                        Ok(plan) => {
+                            state.current = Some(StagedPlan::One(plan));
+                        }
+                        Err(block) => state.show_toast(ToastLevel::Warning, block.message),
+                    }
+                } else {
+                    state.modal = Some(Modal::DiffstatDirty {
+                        site: ps,
+                        env: pe,
+                        files,
+                    });
+                }
+                return;
+            }
             if files.is_empty() {
                 stage_after_diffstat(state, site, env, files);
             } else {
@@ -449,7 +466,7 @@ fn selected_env(state: &AppState) -> Option<(String, String)> {
     }
 }
 
-fn wants_updatedb(state: &AppState, site: &str) -> bool {
+pub(crate) fn wants_updatedb(state: &AppState, site: &str) -> bool {
     state.site(site).is_some_and(|s| {
         s.framework == Framework::Drupal
             || s.overlay

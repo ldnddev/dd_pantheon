@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use dd_pantheon::app::App;
 use dd_pantheon::models::MetricsPeriod;
-use dd_pantheon::state::{FocusPane, TreeSel};
+use dd_pantheon::state::{FocusPane, Modal, TreeSel};
 use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -49,12 +49,12 @@ fn demo_period_keys_seed_series_and_m_stays_cms() {
 
     app.handle_key(key(KeyCode::Char('m'))).unwrap();
     assert_eq!(app.state.metrics_period, MetricsPeriod::Week);
-    let toast = app.state.toast.as_ref().expect("cms toast");
     assert!(
-        toast.message.to_ascii_lowercase().contains("cms"),
-        "lowercase m must stay CMS, got {}",
-        toast.message
+        matches!(app.state.modal, Some(Modal::Cms { .. })),
+        "lowercase m must open the CMS form, not switch the metrics period"
     );
+    app.handle_key(key(KeyCode::Esc)).unwrap();
+    assert!(app.state.modal.is_none());
 
     app.handle_key(KeyEvent::new(KeyCode::Char('M'), KeyModifiers::SHIFT))
         .unwrap();

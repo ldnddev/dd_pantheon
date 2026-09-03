@@ -18,12 +18,39 @@ pub struct AppConfig {
     pub last_env: Option<String>,
     #[serde(default)]
     pub metrics_period: MetricsPeriod,
+    /// Last 50 palette/CMS lines. Table (must sit before `[orgs]` / `[locals]`).
+    #[serde(default)]
+    pub history: History,
     /// Last-picked org **id** (UUID) per terminus site name.
     #[serde(default)]
     pub orgs: HashMap<String, String>,
     /// Fallback local path bindings (site name → path).
     #[serde(default)]
     pub locals: HashMap<String, String>,
+}
+
+pub const HISTORY_CAP: usize = 50;
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct History {
+    #[serde(default)]
+    pub palette: Vec<String>,
+    #[serde(default)]
+    pub cms: Vec<String>,
+}
+
+pub fn looks_like_machine_token(line: &str) -> bool {
+    line.to_ascii_lowercase().contains("--machine-token")
+}
+
+pub fn push_history(list: &mut Vec<String>, line: impl Into<String>) {
+    let line = line.into().trim().to_string();
+    if line.is_empty() || looks_like_machine_token(&line) {
+        return;
+    }
+    list.retain(|e| e != &line);
+    list.insert(0, line);
+    list.truncate(HISTORY_CAP);
 }
 
 impl Default for AppConfig {
@@ -33,6 +60,7 @@ impl Default for AppConfig {
             last_site: None,
             last_env: None,
             metrics_period: MetricsPeriod::Day,
+            history: History::default(),
             orgs: HashMap::new(),
             locals: HashMap::new(),
         }
@@ -111,6 +139,48 @@ impl ConfigStore {
         fs::rename(&tmp, &self.path)
             .with_context(|| format!("rename {} -> {}", tmp.display(), self.path.display()))?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn history_drops_machine_token_and_caps() {
+        let mut list = Vec::new();
+        push_history(&mut list, "env:clear-cache");
+        push_history(&mut list, "auth:login --machine-token=secret");
+        push_history(&mut list, "remote:wp -- plugin list");
+        push_history(&mut list, "env:clear-cache");
+        assert_eq!(
+            list,
+            vec![
+                "env:clear-cache".to_string(),
+                "remote:wp -- plugin list".into()
+            ]
+        );
+        for i in 0..60 {
+            push_history(&mut list, format!("cmd-{i}"));
+        }
+        assert_eq!(list.len(), HISTORY_CAP);
+        assert_eq!(list[0], "cmd-59");
+    }
+
+    #[test]
+    fn history_table_serializes_before_orgs() {
+        let cfg = AppConfig {
+            history: History {
+                palette: vec!["env:clear-cache".into()],
+                cms: vec!["status".into()],
+            },
+            orgs: HashMap::from([("acme-wp".into(), "uuid".into())]),
+            ..AppConfig::default()
+        };
+        let raw = toml::to_string_pretty(&cfg).expect("toml");
+        let hist = raw.find("[history]").expect("history table");
+        let orgs = raw.find("[orgs]").expect("orgs table");
+        assert!(hist < orgs, "scalars/history must precede [orgs]: {raw}");
     }
 }
 

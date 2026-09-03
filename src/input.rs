@@ -1,5 +1,5 @@
 use crate::models::InspectorTab;
-use crate::state::{AppState, CreateField, FocusPane, Modal};
+use crate::state::{AppState, CmsFocus, CreateField, FocusPane, Modal, PaletteForm};
 use crate::toast::ToastLevel;
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -33,7 +33,9 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
                 | Modal::CloneContent { .. }
                 | Modal::DomainAdd { .. }
                 | Modal::HttpsSet { .. }
-                | Modal::LockEnable { .. },
+                | Modal::LockEnable { .. }
+                | Modal::Palette { .. }
+                | Modal::Cms { .. },
         )
     );
 
@@ -78,11 +80,11 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
             return Ok(false);
         }
         KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            state.show_toast(ToastLevel::Info, "palette lands in PR 13");
+            crate::workflows::palette::open(state);
             return Ok(false);
         }
         KeyCode::Char(':') => {
-            state.show_toast(ToastLevel::Info, "palette lands in PR 13");
+            crate::workflows::palette::open(state);
             return Ok(false);
         }
         KeyCode::Tab => {
@@ -784,6 +786,12 @@ fn handle_modal(state: &mut AppState, key: KeyEvent, modal: Modal) -> Result<boo
                 });
             }
         },
+        Modal::Palette {
+            query,
+            selected,
+            form,
+        } => handle_palette(state, key, query, selected, form),
+        Modal::Cms { mut form } => handle_cms(state, key, &mut form),
         Modal::Error { .. } => {
             if matches!(key.code, KeyCode::Esc | KeyCode::Enter) {
                 state.modal = None;
@@ -800,6 +808,202 @@ fn handle_modal(state: &mut AppState, key: KeyEvent, modal: Modal) -> Result<boo
         },
     }
     Ok(false)
+}
+
+fn handle_palette(
+    state: &mut AppState,
+    key: KeyEvent,
+    mut query: String,
+    mut selected: usize,
+    form: Option<PaletteForm>,
+) {
+    if let Some(mut form) = form {
+        match key.code {
+            KeyCode::Esc => {
+                state.modal = Some(Modal::Palette {
+                    query,
+                    selected,
+                    form: None,
+                });
+                return;
+            }
+            KeyCode::Enter => {
+                crate::workflows::palette::submit(state, form);
+                return;
+            }
+            KeyCode::Tab => {
+                form.cycle_focus(if key.modifiers.contains(KeyModifiers::SHIFT) {
+                    -1
+                } else {
+                    1
+                });
+            }
+            KeyCode::BackTab => form.cycle_focus(-1),
+            KeyCode::Char(' ') if form.focused_toggle().is_some() => {
+                if let Some(i) = form.focused_toggle() {
+                    form.toggles[i].1 = !form.toggles[i].1;
+                }
+            }
+            KeyCode::Backspace => {
+                if let Some(i) = form.focused_arg() {
+                    form.args[i].1.pop();
+                } else if form.focus_element() {
+                    if let Some(el) = form.element.as_mut() {
+                        el.pop();
+                    }
+                } else if form.focus_extra() {
+                    form.extra.pop();
+                }
+            }
+            KeyCode::Char(c)
+                if !key.modifiers.contains(KeyModifiers::CONTROL)
+                    && form.focused_toggle().is_none() =>
+            {
+                if let Some(i) = form.focused_arg() {
+                    form.args[i].1.push(c);
+                } else if form.focus_element() {
+                    if let Some(el) = form.element.as_mut() {
+                        el.push(c);
+                    }
+                } else if form.focus_extra() {
+                    form.extra.push(c);
+                }
+            }
+            _ => {}
+        }
+        state.modal = Some(Modal::Palette {
+            query,
+            selected,
+            form: Some(form),
+        });
+        return;
+    }
+
+    match key.code {
+        KeyCode::Esc => {
+            state.modal = None;
+            return;
+        }
+        KeyCode::Enter => {
+            let entry = crate::workflows::palette::matches_for(state, &query)
+                .get(selected)
+                .map(|e| (*e).clone());
+            if let Some(entry) = entry {
+                let form = crate::workflows::palette::form_from_entry(state, &entry);
+                state.modal = Some(Modal::Palette {
+                    query,
+                    selected,
+                    form: Some(form),
+                });
+            } else {
+                state.show_toast(ToastLevel::Warning, "no catalog match");
+                state.modal = Some(Modal::Palette {
+                    query,
+                    selected,
+                    form: None,
+                });
+            }
+            return;
+        }
+        KeyCode::Up => {
+            selected = selected.saturating_sub(1);
+        }
+        KeyCode::Down => {
+            let n = crate::workflows::palette::matches_for(state, &query).len();
+            if n > 0 {
+                selected = (selected + 1).min(n - 1);
+            }
+        }
+        KeyCode::Backspace => {
+            query.pop();
+            selected = 0;
+        }
+        KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+            query.push(c);
+            selected = 0;
+        }
+        _ => {}
+    }
+    let n = crate::workflows::palette::matches_for(state, &query).len();
+    if n == 0 {
+        selected = 0;
+    } else {
+        selected = selected.min(n - 1);
+    }
+    state.modal = Some(Modal::Palette {
+        query,
+        selected,
+        form: None,
+    });
+}
+
+fn handle_cms(state: &mut AppState, key: KeyEvent, form: &mut crate::state::CmsForm) {
+    match key.code {
+        KeyCode::Esc => {
+            state.modal = None;
+            return;
+        }
+        KeyCode::Enter => {
+            crate::workflows::cms::submit(state, form.clone());
+            return;
+        }
+        KeyCode::Tab => {
+            form.focus = if key.modifiers.contains(KeyModifiers::SHIFT) {
+                form.focus.prev()
+            } else {
+                form.focus.next()
+            };
+        }
+        KeyCode::BackTab => form.focus = form.focus.prev(),
+        KeyCode::Char(' ') if matches!(form.focus, CmsFocus::Target | CmsFocus::Cms) => {
+            match form.focus {
+                CmsFocus::Target => form.target = form.target.toggle(),
+                CmsFocus::Cms => form.cms = form.cms.toggle(),
+                _ => {}
+            }
+        }
+        KeyCode::Up => {
+            if form.history.is_empty() {
+                // keep command
+            } else {
+                let next = match form.history_idx {
+                    None => 0,
+                    Some(i) => (i + 1).min(form.history.len() - 1),
+                };
+                form.history_idx = Some(next);
+                if let Some(line) = form.history.get(next) {
+                    form.command = line.clone();
+                }
+            }
+        }
+        KeyCode::Down => match form.history_idx {
+            None => {}
+            Some(0) => {
+                form.history_idx = None;
+                form.command.clear();
+            }
+            Some(i) => {
+                let next = i - 1;
+                form.history_idx = Some(next);
+                if let Some(line) = form.history.get(next) {
+                    form.command = line.clone();
+                }
+            }
+        },
+        KeyCode::Backspace if matches!(form.focus, CmsFocus::Command) => {
+            form.command.pop();
+            form.history_idx = None;
+        }
+        KeyCode::Char(c)
+            if !key.modifiers.contains(KeyModifiers::CONTROL)
+                && matches!(form.focus, CmsFocus::Command) =>
+        {
+            form.command.push(c);
+            form.history_idx = None;
+        }
+        _ => {}
+    }
+    state.modal = Some(Modal::Cms { form: form.clone() });
 }
 
 fn handle_site_create(

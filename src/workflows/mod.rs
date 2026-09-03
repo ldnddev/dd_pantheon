@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod backup;
+pub mod cms;
 pub mod content;
 pub mod create;
 pub mod deploy;
@@ -8,7 +9,10 @@ pub mod inventory;
 pub mod local;
 pub mod metrics;
 pub mod multidev;
+pub mod palette;
 pub mod tags;
+
+pub use palette::{CatalogError, PaletteArgs, plan_from_catalog};
 
 use crate::jobs::{self, JobKind};
 use crate::plan::{SafetyTier, StagedPlan};
@@ -37,7 +41,7 @@ pub fn stage_action(state: &mut AppState, action_id: &str) -> bool {
             false
         }
         "cms" | "m" => {
-            state.show_toast(ToastLevel::Info, "CMS form lands in PR 13");
+            cms::open(state);
             false
         }
         "create" | "n" => {

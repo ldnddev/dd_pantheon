@@ -143,10 +143,153 @@ pub enum Modal {
         password: String,
         focus: u8,
     },
+    Palette {
+        query: String,
+        selected: usize,
+        form: Option<PaletteForm>,
+    },
+    Cms {
+        form: CmsForm,
+    },
     Error {
         msg: String,
     },
     QuitConfirm,
+}
+
+#[derive(Clone, Debug)]
+pub struct PaletteForm {
+    pub entry: CatalogEntry,
+    pub args: Vec<(String, String)>,
+    pub toggles: Vec<(String, bool)>,
+    pub element: Option<String>,
+    pub extra: String,
+    pub focus: usize,
+}
+
+impl PaletteForm {
+    pub fn field_count(&self) -> usize {
+        self.args.len() + self.toggles.len() + usize::from(self.element.is_some()) + 1
+    }
+
+    pub fn focus_extra(&self) -> bool {
+        self.focus + 1 == self.field_count()
+    }
+
+    pub fn focus_element(&self) -> bool {
+        self.element.is_some() && self.focus == self.args.len() + self.toggles.len()
+    }
+
+    pub fn focused_arg(&self) -> Option<usize> {
+        if self.focus < self.args.len() {
+            Some(self.focus)
+        } else {
+            None
+        }
+    }
+
+    pub fn focused_toggle(&self) -> Option<usize> {
+        let i = self.focus.checked_sub(self.args.len())?;
+        if i < self.toggles.len() {
+            Some(i)
+        } else {
+            None
+        }
+    }
+
+    pub fn cycle_focus(&mut self, dir: i32) {
+        let n = self.field_count();
+        if n == 0 {
+            return;
+        }
+        if dir >= 0 {
+            self.focus = (self.focus + 1) % n;
+        } else {
+            self.focus = (self.focus + n - 1) % n;
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CmsTarget {
+    Remote,
+    Local,
+}
+
+impl CmsTarget {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Remote => "remote",
+            Self::Local => "local",
+        }
+    }
+
+    pub fn toggle(self) -> Self {
+        match self {
+            Self::Remote => Self::Local,
+            Self::Local => Self::Remote,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CmsKind {
+    Wp,
+    Drush,
+}
+
+impl CmsKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Wp => "wp",
+            Self::Drush => "drush",
+        }
+    }
+
+    pub fn toggle(self) -> Self {
+        match self {
+            Self::Wp => Self::Drush,
+            Self::Drush => Self::Wp,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CmsFocus {
+    Target,
+    Cms,
+    Command,
+    History,
+}
+
+impl CmsFocus {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Target => Self::Cms,
+            Self::Cms => Self::Command,
+            Self::Command => Self::History,
+            Self::History => Self::Target,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        match self {
+            Self::Target => Self::History,
+            Self::Cms => Self::Target,
+            Self::Command => Self::Cms,
+            Self::History => Self::Command,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct CmsForm {
+    pub target: CmsTarget,
+    pub cms: CmsKind,
+    pub command: String,
+    pub history: Vec<String>,
+    pub history_idx: Option<usize>,
+    pub focus: CmsFocus,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -289,6 +432,8 @@ pub struct AppState {
     pub create_orgs: Vec<OrgRef>,
     pub create_upstreams: Vec<UpstreamRef>,
     pub pending_create_bind: Option<(String, PathBuf)>,
+    /// Palette `connection:set git` waits for env:diffstat before staging.
+    pub pending_connection_set: Option<(String, String, String)>,
     pub metrics_error: Option<String>,
     pub period_hits: Vec<PeriodHit>,
     pub org_prompted: HashSet<String>,
@@ -373,6 +518,7 @@ impl AppState {
             create_orgs: Vec::new(),
             create_upstreams: Vec::new(),
             pending_create_bind: None,
+            pending_connection_set: None,
             metrics_error: None,
             period_hits: Vec::new(),
             org_prompted: HashSet::new(),

@@ -14,7 +14,8 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect, scroll: u16) {
     lines.push(line("Ctrl+Q", "Quit"));
     lines.push(line("Tab / S-Tab", "Cycle panes"));
     lines.push(line("Esc", "Close modal / clear filter"));
-    lines.push(line(":", "Palette (PR 13)"));
+    lines.push(line(":", "Palette (fuzzy catalog; never auto-runs)"));
+    lines.push(line("Ctrl+K", "Palette"));
     lines.push(line("Ctrl+L", "Login (machine token)"));
     lines.push(line("Ctrl+C", "Cancel running job"));
 
@@ -57,7 +58,7 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect, scroll: u16) {
         "d / w / Shift+M",
         "Metrics period (env row; m is CMS)",
     ));
-    lines.push(line("m", "CMS form (PR 13) — never month"));
+    lines.push(line("m", "CMS form (remote/local; never month)"));
 
     push_header(&mut lines, state, "Preview / log");
     lines.push(line(

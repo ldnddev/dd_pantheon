@@ -111,14 +111,14 @@ impl CommandPlan {
         match self.tool {
             ToolKind::Terminus => {
                 if !has_flag(&args, "--no-interaction") && !has_flag(&args, "-n") {
-                    args.push("--no-interaction".to_string());
+                    insert_before_ddash(&mut args, "--no-interaction");
                 }
                 if self.confirm_with_yes
                     && gate_passed
                     && !has_flag(&args, "--yes")
                     && !has_flag(&args, "-y")
                 {
-                    args.push("--yes".to_string());
+                    insert_before_ddash(&mut args, "--yes");
                 }
             }
             ToolKind::Lando => {
@@ -200,6 +200,16 @@ impl StagedPlan {
 
 fn has_flag(args: &[String], flag: &str) -> bool {
     args.iter().any(|a| a == flag)
+}
+
+/// Terminus flags must sit before `--` so CMS argv (`remote:wp … -- plugin list`)
+/// does not receive `--yes` / `--no-interaction`.
+fn insert_before_ddash(args: &mut Vec<String>, flag: &str) {
+    if let Some(i) = args.iter().position(|a| a == "--") {
+        args.insert(i, flag.to_string());
+    } else {
+        args.push(flag.to_string());
+    }
 }
 
 fn render_shell_line(binary: &Path, argv: &[String], cwd: Option<&PathBuf>) -> String {
@@ -294,6 +304,21 @@ mod tests {
         assert!(argv.contains(&"--no-interaction".to_string()));
         assert!(argv.contains(&"--yes".to_string()));
         assert_eq!(argv.iter().filter(|a| *a == "--yes").count(), 1);
+    }
+
+    #[test]
+    fn terminus_injects_flags_before_ddash() {
+        let plan = terminus_plan(&["remote:wp", "acme-wp.test", "--", "plugin", "list"], true);
+        let argv = plan.effective_argv();
+        let ddash = argv.iter().position(|a| a == "--").expect("--");
+        let yes = argv.iter().position(|a| a == "--yes").expect("--yes");
+        let ni = argv
+            .iter()
+            .position(|a| a == "--no-interaction")
+            .expect("--no-interaction");
+        assert!(yes < ddash);
+        assert!(ni < ddash);
+        assert_eq!(&argv[ddash + 1..], &["plugin".to_string(), "list".into()]);
     }
 
     #[test]

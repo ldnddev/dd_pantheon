@@ -319,6 +319,110 @@ pub fn visible<'a>(catalog: &'a [CatalogEntry]) -> impl Iterator<Item = &'a Cata
     catalog.iter().filter(|e| e.kind != CatalogKind::Hidden)
 }
 
+/// Small catalog so `--demo` palette can run without Terminus.
+pub fn demo_catalog() -> Vec<CatalogEntry> {
+    vec![
+        terminus(
+            "env:deploy",
+            "Deploy the current path onto a target environment",
+            vec![req("site_env")],
+            &["--cc", "--updatedb", "--sync-content"],
+        ),
+        terminus(
+            "env:wipe",
+            "Wipe an environment database and files",
+            vec![req("site_env")],
+            &[],
+        ),
+        terminus(
+            "env:clone-content",
+            "Clone database and files from one env onto another",
+            vec![req("site_env"), req("to_environment")],
+            &["--cc", "--updatedb", "--db-only", "--files-only"],
+        ),
+        terminus(
+            "env:clear-cache",
+            "Clear caches on an environment",
+            vec![req("site_env")],
+            &[],
+        ),
+        terminus(
+            "backup:restore",
+            "Restore a backup onto an environment",
+            vec![req("site_env")],
+            &["--element"],
+        ),
+        terminus(
+            "connection:set",
+            "Set git or sftp connection mode",
+            vec![req("site_env"), req("mode")],
+            &[],
+        ),
+        terminus(
+            "multidev:delete",
+            "Delete a Multidev environment",
+            vec![req("site_env")],
+            &["--delete-branch"],
+        ),
+        terminus(
+            "domain:remove",
+            "Remove a domain from an environment",
+            vec![req("site_env"), req("domain")],
+            &[],
+        ),
+        terminus(
+            "remote:wp",
+            "Run WP-CLI on a remote WordPress environment",
+            vec![req("site_env")],
+            &[],
+        ),
+        terminus(
+            "remote:drush",
+            "Run Drush on a remote Drupal environment",
+            vec![req("site_env")],
+            &[],
+        ),
+        lando_entry("pull", "Pull code/db/files from Pantheon".into()),
+        lando_entry("rebuild", "Rebuild the local app".into()),
+        lando_entry("destroy", "Destroy the local app".into()),
+        lando_entry("push", "Push code/db/files to Pantheon".into()),
+        lando_entry("start", "Start the local app".into()),
+    ]
+}
+
+fn req(name: &str) -> CatalogArg {
+    CatalogArg {
+        name: name.into(),
+        required: true,
+        description: String::new(),
+    }
+}
+
+fn terminus(
+    name: &str,
+    description: &str,
+    arguments: Vec<CatalogArg>,
+    option_names: &[&str],
+) -> CatalogEntry {
+    CatalogEntry {
+        tool: ToolKind::Terminus,
+        safety_hint: hint_from_name(name),
+        kind: kind_for(name, false),
+        name: name.into(),
+        description: description.into(),
+        arguments,
+        options: option_names
+            .iter()
+            .map(|n| CatalogOpt {
+                name: (*n).into(),
+                shortcut: None,
+                accept_value: *n == "--element",
+                description: String::new(),
+            })
+            .collect(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
