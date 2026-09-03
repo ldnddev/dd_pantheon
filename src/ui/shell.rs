@@ -3,6 +3,7 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Paragraph};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 pub fn draw_header(f: &mut Frame, state: &AppState, area: Rect) {
     let mut title = "dd_pantheon".to_string();
@@ -26,12 +27,44 @@ pub fn draw_footer(f: &mut Frame, state: &AppState, area: Rect) {
     let _ = state;
 }
 
-pub fn footer_keys(width: u16) -> &'static str {
-    if width < 80 {
+pub fn footer_keys(width: u16) -> String {
+    let raw = if width < 80 {
         "F1:Help  F2:Theme  C-q:Quit  /:Filter"
     } else if width < 120 {
         "F1: Help   F2: Theme   Ctrl+Q: Quit   F4: Layout   j/k: Nav   Enter: Run   /: Filter   :: Pal"
     } else {
         "F1: Help   F2: Theme   Ctrl+Q: Quit   F3: Doctor   F4: Layout   j/k: Nav   Tab: Pane   Enter: Run   /: Filter   :: Palette   r: Refresh   (mouse: click/scroll)"
+    };
+    truncate_from_right(raw, width as usize)
+}
+
+fn truncate_from_right(s: &str, max: usize) -> String {
+    if max == 0 {
+        return String::new();
+    }
+    if s.width() <= max {
+        return s.to_string();
+    }
+    let mut out = String::new();
+    for ch in s.chars() {
+        let next = out.width() + ch.width().unwrap_or(0);
+        if next > max {
+            break;
+        }
+        out.push(ch);
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn footer_truncates_from_the_right() {
+        let s = truncate_from_right("F1:Help  F2:Theme  C-q:Quit  /:Filter", 10);
+        assert_eq!(s, "F1:Help  F");
+        assert!(s.starts_with("F1:Help"));
+        assert_eq!(s.width(), 10);
     }
 }

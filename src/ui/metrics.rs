@@ -147,7 +147,7 @@ fn draw_body(f: &mut Frame, state: &AppState, area: Rect) {
         lines.push(Line::from(Span::styled(
             format!(
                 "{}  {:>5}v  {:>5}p  {:>3.0}%",
-                p.datetime,
+                display_datetime(&p.datetime),
                 p.visits,
                 p.pages_served,
                 p.cache_hit_ratio * 100.0
@@ -181,6 +181,32 @@ fn draw_spark_row(
             .max(data.iter().copied().max().unwrap_or(1)),
         chunks[1],
     );
+}
+
+pub fn display_datetime(raw: &str) -> String {
+    let raw = raw.trim();
+    if let Ok(d) = chrono::NaiveDate::parse_from_str(raw, "%Y-%m-%d") {
+        return d.format("%Y-%m-%d").to_string();
+    }
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(raw) {
+        return dt.format("%Y-%m-%d").to_string();
+    }
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(raw, "%Y-%m-%d %H:%M:%S") {
+        return dt.format("%Y-%m-%d").to_string();
+    }
+    raw.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn datetime_display_strips_time() {
+        assert_eq!(display_datetime("2026-08-17"), "2026-08-17");
+        assert_eq!(display_datetime("2026-08-17T12:01:03Z"), "2026-08-17");
+        assert_eq!(display_datetime("2026-08-17 12:01:03"), "2026-08-17");
+    }
 }
 
 fn empty_message(state: &AppState) -> Option<&'static str> {

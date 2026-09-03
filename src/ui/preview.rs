@@ -38,10 +38,16 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect) {
             state.theme.error.add_modifier(Modifier::BOLD)
         }
     };
+    let step = state
+        .current
+        .as_ref()
+        .and_then(workflow_step_label)
+        .map(|s| format!("  {s}"))
+        .unwrap_or_default();
     let title = Line::from(vec![
         Span::raw("Preview  "),
         Span::styled(badge.badge(), badge_style),
-        Span::raw(format!("  target {target}")),
+        Span::raw(format!("  target {target}{step}")),
     ]);
 
     let mut lines = vec![
@@ -81,4 +87,53 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect) {
         .scroll((state.preview_scroll, 0))
         .block(pane_block(title, focused, &state.theme));
     f.render_widget(p, area);
+}
+
+pub fn workflow_step_label(plan: &crate::plan::StagedPlan) -> Option<String> {
+    match plan {
+        crate::plan::StagedPlan::Workflow { plan, step } if !plan.steps.is_empty() => {
+            Some(format!("step {}/{}", step + 1, plan.steps.len()))
+        }
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::plan::{CommandPlan, PlanTarget, StagedPlan, ToolKind, WorkflowPlan};
+    use std::path::PathBuf;
+
+    fn dummy(cmd: &str) -> CommandPlan {
+        CommandPlan {
+            tool: ToolKind::Terminus,
+            binary: PathBuf::from("terminus"),
+            argv: vec![cmd.into()],
+            cwd: None,
+            why: "t".into(),
+            safety: SafetyTier::Mutating,
+            target: PlanTarget::None,
+            dry_run: true,
+            timeout: None,
+            expects_json: false,
+            extra_env: vec![],
+            redact: vec![],
+            confirm_with_yes: false,
+        }
+    }
+
+    #[test]
+    fn workflow_title_includes_step() {
+        let staged = StagedPlan::Workflow {
+            plan: WorkflowPlan {
+                title: "w".into(),
+                why: "w".into(),
+                safety: SafetyTier::Destructive,
+                steps: vec![dummy("backup:create"), dummy("env:wipe")],
+                stop_on_failure: true,
+            },
+            step: 0,
+        };
+        assert_eq!(workflow_step_label(&staged).as_deref(), Some("step 1/2"));
+    }
 }

@@ -2,21 +2,36 @@ use crate::plan::{CommandPlan, PlanTarget, SafetyTier, ToolKind};
 use std::path::PathBuf;
 use std::time::Duration;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("{message}")]
 pub struct SafetyBlock {
     pub message: String,
 }
 
-impl std::fmt::Display for SafetyBlock {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.message)
-    }
+#[derive(Debug, thiserror::Error)]
+pub enum PlanError {
+    #[error("{0}")]
+    Safety(#[from] SafetyBlock),
+    #[error("{0}")]
+    Message(String),
 }
-
-impl std::error::Error for SafetyBlock {}
 
 /// Preview and (later) the job runner share this: Mutating needs Enter;
 /// Destructive needs the confirm modal; LiveGate needs the typed word.
+#[cfg(test)]
+mod error_tests {
+    use super::*;
+
+    #[test]
+    fn plan_error_from_safety_block() {
+        let err: PlanError = SafetyBlock {
+            message: "dirty env:diffstat — commit via env:commit or abort".into(),
+        }
+        .into();
+        assert!(err.to_string().contains("dirty env:diffstat"));
+    }
+}
+
 pub fn gate_passed(tier: SafetyTier, destructive_confirmed: bool, livegate_ok: bool) -> bool {
     match tier {
         SafetyTier::ReadOnly | SafetyTier::Mutating => true,

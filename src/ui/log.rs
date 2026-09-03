@@ -3,7 +3,7 @@ use crate::ui::pane_block;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Paragraph, Wrap};
+use ratatui::widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap};
 
 pub fn draw(f: &mut Frame, state: &AppState, area: Rect) {
     if area.width == 0 || area.height == 0 {
@@ -38,4 +38,13 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect) {
         .scroll((state.log_scroll, 0))
         .block(pane_block(title, focused, &state.theme));
     f.render_widget(p, area);
+    if state.log_lines.len() as u16 + 2 > area.height {
+        let mut sb =
+            ScrollbarState::new(state.log_lines.len().max(1)).position(state.log_scroll as usize);
+        f.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight).style(state.theme.scrollbar),
+            area,
+            &mut sb,
+        );
+    }
 }
