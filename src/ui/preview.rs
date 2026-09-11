@@ -1,13 +1,14 @@
 use crate::plan::SafetyTier;
-use crate::state::{AppState, FocusPane};
+use crate::state::{AppState, FocusPane, PreviewButton, PreviewButtonHit};
 use crate::ui::pane_block;
 use ratatui::Frame;
-use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
-pub fn draw(f: &mut Frame, state: &AppState, area: Rect) {
+pub fn draw(f: &mut Frame, state: &mut AppState, area: Rect) {
+    state.preview_buttons.clear();
     let focused = state.focus == FocusPane::Preview;
     let (badge, target, why, shell, cwd) = match &state.current {
         Some(plan) => {
@@ -45,11 +46,48 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect) {
         .map(|s| format!("  {s}"))
         .unwrap_or_default();
     let title = Line::from(vec![
-        Span::raw("Preview  "),
+        Span::raw("Command preview  "),
         Span::styled(badge.badge(), badge_style),
-        Span::raw(format!("  target {target}{step}")),
+        Span::raw(format!("  {target}{step}")),
     ]);
 
+    let block = pane_block(title, focused, &state.theme);
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    if inner.height == 0 || inner.width == 0 {
+        return;
+    }
+
+    if inner.height >= 7 {
+        draw_roomy(f, state, inner, &shell, &why, &cwd);
+    } else {
+        draw_compact(f, state, inner, &shell, &why, &cwd);
+    }
+}
+
+fn draw_roomy(f: &mut Frame, state: &mut AppState, area: Rect, shell: &str, why: &str, cwd: &str) {
+    let cmd_h = if area.height >= 9 { 4 } else { 3 };
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(cmd_h),
+            Constraint::Min(2),
+            Constraint::Length(3),
+        ])
+        .split(area);
+    draw_command_bar(f, state, chunks[0], shell);
+    draw_rationale(f, state, chunks[1], why, cwd);
+    draw_buttons(f, state, chunks[2]);
+}
+
+fn draw_compact(
+    f: &mut Frame,
+    state: &mut AppState,
+    area: Rect,
+    shell: &str,
+    why: &str,
+    cwd: &str,
+) {
     let mut lines = vec![
         Line::from(Span::styled(
             format!("$ {shell}"),
@@ -57,17 +95,147 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect) {
         )),
         Line::from(vec![
             Span::styled("cwd: ", state.theme.label),
-            Span::styled(cwd, state.theme.secondary),
+            Span::styled(cwd.to_string(), state.theme.secondary),
         ]),
         Line::from(vec![
-            Span::styled("why: ", state.theme.label),
-            if why.contains("raw palette") {
-                Span::styled(why, state.theme.warning_style)
-            } else {
-                Span::raw(why)
-            },
+            Span::styled("rationale: ", state.theme.label),
+            rationale_span(state, why),
         ]),
     ];
+    push_workflow_steps(&mut lines, state);
+    let p = Paragraph::new(lines)
+        .wrap(Wrap { trim: false })
+        .scroll((state.preview_scroll, 0));
+    f.render_widget(p, area);
+}
+
+fn draw_command_bar(f: &mut Frame, state: &AppState, area: Rect, shell: &str) {
+    let style = Style::default()
+        .fg(state.theme.colors.text_primary)
+        .bg(state.theme.colors.selected_background);
+    let bar = Block::default()
+        .borders(Borders::ALL)
+        .border_style(state.theme.border)
+        .style(style);
+    let inner = bar.inner(area);
+    f.render_widget(bar, area);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+    let cmd = if shell.is_empty() {
+        "$  (no plan staged)".to_string()
+    } else {
+        format!("$ {shell}")
+    };
+    f.render_widget(
+        Paragraph::new(cmd).style(style).wrap(Wrap { trim: false }),
+        inner,
+    );
+}
+
+fn draw_rationale(f: &mut Frame, state: &AppState, area: Rect, why: &str, cwd: &str) {
+    let mut lines = vec![
+        Line::from(Span::styled("rationale", state.theme.label)),
+        Line::from(rationale_span(state, why)),
+    ];
+    if cwd != "(none)" {
+        lines.push(Line::from(vec![
+            Span::styled("cwd: ", state.theme.label),
+            Span::styled(cwd.to_string(), state.theme.secondary),
+        ]));
+    }
+    push_workflow_steps(&mut lines, state);
+    f.render_widget(
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: true })
+            .scroll((state.preview_scroll, 0)),
+        area,
+    );
+}
+
+const BUTTON_GAP: u16 = 1;
+const BUTTON_PAD: u16 = 1;
+
+fn button_width(label: &str) -> u16 {
+    // left/right border + one space of padding each side + label
+    (label.chars().count() as u16)
+        .saturating_add(BUTTON_PAD.saturating_mul(2))
+        .saturating_add(2)
+}
+
+fn outline_button(label: &str, fg: Color) -> Paragraph<'static> {
+    let pad = " ".repeat(BUTTON_PAD as usize);
+    let color = Style::default().fg(fg);
+    Paragraph::new(format!("{pad}{label}{pad}"))
+        .alignment(ratatui::layout::Alignment::Center)
+        .style(color)
+        .block(Block::default().borders(Borders::ALL).border_style(color))
+}
+
+fn draw_buttons(f: &mut Frame, state: &mut AppState, area: Rect) {
+    let process_w = button_width("PROCESS COMMAND");
+    let copy_w = button_width("COPY TO CLIPBOARD");
+    let cancel_w = button_width("CANCEL");
+    let needed = process_w
+        .saturating_add(copy_w)
+        .saturating_add(cancel_w)
+        .saturating_add(BUTTON_GAP.saturating_mul(2));
+    let (process_w, copy_w, cancel_w) = if needed > area.width && area.width > 0 {
+        let scale = area.width as f64 / needed as f64;
+        (
+            ((process_w as f64 * scale).floor() as u16).max(3),
+            ((copy_w as f64 * scale).floor() as u16).max(3),
+            ((cancel_w as f64 * scale).floor() as u16).max(3),
+        )
+    } else {
+        (process_w, copy_w, cancel_w)
+    };
+    let row = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(process_w),
+            Constraint::Length(BUTTON_GAP),
+            Constraint::Length(copy_w),
+            Constraint::Length(BUTTON_GAP),
+            Constraint::Length(cancel_w),
+            Constraint::Min(0),
+        ])
+        .split(area);
+
+    f.render_widget(
+        outline_button("PROCESS COMMAND", state.theme.colors.success),
+        row[0],
+    );
+    state.preview_buttons.push(PreviewButtonHit {
+        button: PreviewButton::Process,
+        area: row[0],
+    });
+
+    f.render_widget(
+        outline_button("COPY TO CLIPBOARD", state.theme.colors.warning),
+        row[2],
+    );
+    state.preview_buttons.push(PreviewButtonHit {
+        button: PreviewButton::Copy,
+        area: row[2],
+    });
+
+    f.render_widget(outline_button("CANCEL", state.theme.colors.error), row[4]);
+    state.preview_buttons.push(PreviewButtonHit {
+        button: PreviewButton::Cancel,
+        area: row[4],
+    });
+}
+
+fn rationale_span(state: &AppState, why: &str) -> Span<'static> {
+    if why.contains("raw palette") {
+        Span::styled(why.to_string(), state.theme.warning_style)
+    } else {
+        Span::raw(why.to_string())
+    }
+}
+
+fn push_workflow_steps(lines: &mut Vec<Line<'static>>, state: &AppState) {
     if let Some(crate::plan::StagedPlan::Workflow { plan, step }) = &state.current {
         for (i, p) in plan.steps.iter().enumerate() {
             let style = if i == *step {
@@ -81,12 +249,6 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect) {
             )));
         }
     }
-
-    let p = Paragraph::new(lines)
-        .wrap(Wrap { trim: false })
-        .scroll((state.preview_scroll, 0))
-        .block(pane_block(title, focused, &state.theme));
-    f.render_widget(p, area);
 }
 
 pub fn workflow_step_label(plan: &crate::plan::StagedPlan) -> Option<String> {
@@ -135,5 +297,14 @@ mod tests {
             step: 0,
         };
         assert_eq!(workflow_step_label(&staged).as_deref(), Some("step 1/2"));
+    }
+
+    #[test]
+    fn buttons_share_padding_and_width_formula() {
+        assert_eq!(button_width("PROCESS COMMAND"), 15 + 2 + 2);
+        assert_eq!(button_width("COPY TO CLIPBOARD"), 17 + 2 + 2);
+        assert_eq!(button_width("CANCEL"), 6 + 2 + 2);
+        assert_eq!(BUTTON_GAP, 1);
+        assert_eq!(BUTTON_PAD, 1);
     }
 }

@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use dd_pantheon::app::App;
 use dd_pantheon::models::LayoutId;
-use dd_pantheon::state::{FocusPane, TreeSel};
+use dd_pantheon::state::{FocusPane, Modal, TreeSel};
 use dd_pantheon::ui::footer_keys;
 use std::fs;
 use std::path::PathBuf;
@@ -117,6 +117,67 @@ fn ctrl_q_quits_and_bare_q_does_not() {
     let quit = app.handle_key(ctrl_q).unwrap();
     assert!(quit);
     assert!(app.state.should_quit);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn slash_opens_filter_from_any_pane() {
+    let (mut app, root) = demo_app();
+    app.state.focus = FocusPane::Log;
+    app.handle_key(key(KeyCode::Char('/'))).unwrap();
+    assert!(matches!(app.state.modal, Some(Modal::Filter { .. })));
+    app.handle_key(key(KeyCode::Esc)).unwrap();
+    assert!(app.state.modal.is_none());
+
+    app.state.focus = FocusPane::Preview;
+    app.handle_key(key(KeyCode::Char('/'))).unwrap();
+    match &app.state.modal {
+        Some(Modal::Filter { query, .. }) => assert!(query.is_empty()),
+        other => panic!("expected filter modal, got {other:?}"),
+    }
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn slash_filter_matches_name_and_tag() {
+    let (mut app, root) = demo_app();
+    app.handle_key(key(KeyCode::Char('/'))).unwrap();
+    for ch in ['p', 'r', 'o', 'd'] {
+        app.handle_key(key(KeyCode::Char(ch))).unwrap();
+    }
+    let Some(Modal::Filter { query, selected }) = &app.state.modal else {
+        panic!("filter modal");
+    };
+    assert_eq!(query, "prod");
+    let hits = app.state.filter_hits(query);
+    assert!(
+        hits.iter().any(|h| h.site == "acme-wp" && h.env.is_none()),
+        "prod tag should list acme-wp: {hits:?}"
+    );
+    assert!(hits.iter().any(|h| h.site == "acme-d10"));
+    assert!(!hits.iter().any(|h| h.site == "frozen-lab"));
+    let _ = selected;
+    app.handle_key(key(KeyCode::Enter)).unwrap();
+    assert!(app.state.modal.is_none());
+    assert_eq!(app.state.filter, "prod");
+    assert!(
+        app.state
+            .tree_rows
+            .iter()
+            .any(|r| r.site == "acme-wp" && r.env.is_none())
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn colon_opens_command_palette() {
+    let (mut app, root) = demo_app();
+    app.state.focus = FocusPane::Inspector;
+    app.handle_key(key(KeyCode::Char(':'))).unwrap();
+    assert!(matches!(
+        app.state.modal,
+        Some(Modal::Palette { form: None, .. })
+    ));
     let _ = fs::remove_dir_all(root);
 }
 

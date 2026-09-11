@@ -101,9 +101,105 @@ pub fn subsequence_match(haystack: &str, query: &str) -> bool {
     true
 }
 
+/// Related terms so "cache", "wp", "visits" surface the matching command.
+const RELATED: &[(&str, &[&str])] = &[
+    ("deploy", &["env:deploy", "lando push"]),
+    ("pull", &["lando pull"]),
+    ("push", &["lando push"]),
+    ("cache", &["env:clear-cache"]),
+    ("cc", &["env:clear-cache"]),
+    ("wipe", &["env:wipe"]),
+    ("clone", &["env:clone-content"]),
+    (
+        "backup",
+        &[
+            "backup:create",
+            "backup:restore",
+            "backup:list",
+            "backup:get",
+        ],
+    ),
+    ("restore", &["backup:restore"]),
+    (
+        "multidev",
+        &["multidev:create", "multidev:delete", "multidev:list"],
+    ),
+    ("wp", &["remote:wp"]),
+    ("wordpress", &["remote:wp"]),
+    ("drush", &["remote:drush"]),
+    ("drupal", &["remote:drush"]),
+    ("login", &["auth:login"]),
+    ("logout", &["auth:logout"]),
+    ("start", &["lando start"]),
+    ("stop", &["lando stop"]),
+    ("rebuild", &["lando rebuild"]),
+    ("destroy", &["lando destroy"]),
+    ("metrics", &["env:metrics"]),
+    ("visits", &["env:metrics"]),
+    ("views", &["env:metrics"]),
+    ("domain", &["domain:add", "domain:remove", "domain:list"]),
+    ("lock", &["lock:enable", "lock:disable"]),
+    ("https", &["https:set"]),
+    ("tag", &["tag:add", "tag:remove", "tag:list"]),
+    ("cms", &["remote:wp", "remote:drush"]),
+];
+
+fn query_tokens(query: &str) -> Vec<String> {
+    query
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|t| !t.is_empty())
+        .map(|t| t.to_ascii_lowercase())
+        .collect()
+}
+
+fn related_terms_for(name: &str) -> String {
+    let n = name.to_ascii_lowercase();
+    RELATED
+        .iter()
+        .filter(|(_, cmds)| {
+            cmds.iter().any(|c| {
+                let c = c.to_ascii_lowercase();
+                n == c || n.contains(&c) || c.contains(&n)
+            })
+        })
+        .map(|(term, _)| *term)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn entry_blob(entry: &CatalogEntry) -> String {
+    format!(
+        "{} {} {} {}",
+        entry.name,
+        entry.description,
+        entry.tool.binary_name(),
+        related_terms_for(&entry.name)
+    )
+}
+
+pub fn catalog_matches(entry: &CatalogEntry, query: &str) -> bool {
+    let q = query.trim();
+    if q.is_empty() {
+        return true;
+    }
+    if subsequence_match(&entry.name, q) {
+        return true;
+    }
+    let blob = entry_blob(entry).to_ascii_lowercase();
+    let q_lc = q.to_ascii_lowercase();
+    if blob.contains(&q_lc) {
+        return true;
+    }
+    let tokens = query_tokens(q);
+    !tokens.is_empty()
+        && tokens
+            .iter()
+            .all(|t| blob.contains(t) || subsequence_match(&entry.name, t))
+}
+
 pub fn filter_catalog<'a>(catalog: &'a [CatalogEntry], query: &str) -> Vec<&'a CatalogEntry> {
     let mut hits: Vec<&CatalogEntry> = visible(catalog)
-        .filter(|e| subsequence_match(&e.name, query) || subsequence_match(&e.description, query))
+        .filter(|e| catalog_matches(e, query))
         .collect();
     let q = query.to_ascii_lowercase();
     hits.sort_by(|a, b| {
@@ -120,9 +216,9 @@ fn rank(name: &str, q: &str) -> u8 {
         return 2;
     }
     let n = name.to_ascii_lowercase();
-    if n.starts_with(q) {
+    if n.starts_with(q.trim()) {
         0
-    } else if subsequence_match(&n, q) {
+    } else if n.contains(q.trim()) || subsequence_match(&n, q) {
         1
     } else {
         2
@@ -728,5 +824,27 @@ mod tests {
         assert!(!subsequence_match("env:deploy", "pde"));
         assert!(subsequence_match("lando pull", ""));
         assert!(subsequence_match("Clear caches on an environment", "cache"));
+    }
+
+    #[test]
+    fn related_terms_match_partial_and_tool() {
+        let catalog = demo_catalog();
+        let cache = filter_catalog(&catalog, "cache");
+        assert!(
+            cache.iter().any(|e| e.name == "env:clear-cache"),
+            "cache should find env:clear-cache"
+        );
+        let wp = filter_catalog(&catalog, "wp");
+        assert!(wp.iter().any(|e| e.name == "remote:wp"));
+        let lando_pull = filter_catalog(&catalog, "lando pull");
+        assert!(lando_pull.iter().any(|e| e.name == "lando pull"));
+        let deploy = filter_catalog(&catalog, "terminus deploy");
+        assert!(deploy.iter().any(|e| e.name == "env:deploy"));
+        let wipe = filter_catalog(&catalog, "wipe");
+        assert!(wipe.iter().any(|e| e.name == "env:wipe"));
+        assert!(
+            !wipe.iter().any(|e| e.name == "remote:wp"),
+            "wipe must not subsequence-match WordPress descriptions"
+        );
     }
 }

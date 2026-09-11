@@ -32,7 +32,7 @@ pub fn draw(f: &mut Frame, state: &mut AppState, area: Rect) {
         .as_ref()
         .map(|t| format!("  tag:{t}"))
         .unwrap_or_default();
-    let title = format!("Sites ({count}){filter}{tag}");
+    let title = format!("Available sites ({count}){filter}{tag}");
 
     let views: Vec<RowView> = state
         .tree_rows
@@ -142,7 +142,7 @@ fn tree_item<'a>(row: &'a RowView, theme: &Theme) -> ListItem<'a> {
     } else {
         let env_id = row.env.as_deref().unwrap_or("");
         let mut spans = vec![Span::styled(
-            format!("    {env_id}"),
+            format!("    ▪ {env_id}"),
             Style::default().fg(theme.colors.files),
         )];
         if let Some(mode) = row.mode {

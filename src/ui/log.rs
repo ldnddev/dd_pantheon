@@ -20,13 +20,25 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect) {
         return;
     }
 
-    let title = if state.job_running {
-        "Job log  running  Ctrl+C cancel"
-    } else if state.demo {
-        "Job log  demo"
+    let status = if state.job_running {
+        "RUNNING"
     } else {
-        "Job log"
+        state.connection_status()
     };
+    let title = Line::from(vec![
+        Span::raw("Job log activity"),
+        if state.job_running {
+            Span::styled("  Ctrl+C cancel", state.theme.warning_style)
+        } else {
+            Span::raw("")
+        },
+    ]);
+    let meta = Line::from(format!(
+        "STATUS: {status}   SESSION: {}",
+        state.session_started
+    ))
+    .right_aligned()
+    .style(state.theme.secondary);
     let text = if state.log_lines.is_empty() {
         "no output".to_string()
     } else {
@@ -36,7 +48,7 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect) {
         .style(state.theme.body)
         .wrap(Wrap { trim: false })
         .scroll((state.log_scroll, 0))
-        .block(pane_block(title, focused, &state.theme));
+        .block(pane_block(title, focused, &state.theme).title(meta));
     f.render_widget(p, area);
     if state.log_lines.len() as u16 + 2 > area.height {
         let mut sb =

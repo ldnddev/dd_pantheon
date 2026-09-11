@@ -60,7 +60,11 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
 
 fn draw_modal(f: &mut Frame, state: &mut AppState, area: Rect) {
     use crate::state::Modal;
-    let modal_area = centered_rect(72, 70, area);
+    let modal_area = match &state.modal {
+        Some(Modal::Filter { .. }) => centered_rect(58, 62, area),
+        Some(Modal::Palette { form: None, .. }) => centered_rect(78, 74, area),
+        _ => centered_rect(72, 70, area),
+    };
     state.modal_area = Some(modal_area);
     f.render_widget(Clear, modal_area);
 
@@ -236,17 +240,8 @@ fn draw_modal(f: &mut Frame, state: &mut AppState, area: Rect) {
                 focus,
             );
         }
-        Some(Modal::Filter { query }) => {
-            let p = Paragraph::new(format!("/{query}"))
-                .style(state.theme.input_text_focus)
-                .block(
-                    Block::default()
-                        .title("Filter")
-                        .borders(Borders::ALL)
-                        .border_style(state.theme.input_border_focus)
-                        .style(state.theme.modal),
-                );
-            f.render_widget(p, modal_area);
+        Some(Modal::Filter { query, selected }) => {
+            modals::draw_filter(f, state, modal_area, &query, selected);
         }
         Some(Modal::Error { msg }) => {
             let p = Paragraph::new(msg)

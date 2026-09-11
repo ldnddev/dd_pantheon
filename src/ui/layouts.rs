@@ -22,23 +22,37 @@ pub fn split(layout: LayoutId, body: Rect, state: &AppState) -> PaneRects {
 }
 
 fn split_a(body: Rect) -> PaneRects {
+    // Sites tree on the left spanning inspector + command preview;
+    // job log is full width underneath.
+    let log_h = body
+        .height
+        .saturating_sub(18)
+        .min(8)
+        .max(4)
+        .min(body.height.saturating_sub(12));
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(6),
-            Constraint::Length(5),
-            Constraint::Min(3),
-        ])
+        .constraints([Constraint::Min(12), Constraint::Length(log_h)])
         .split(body);
-    let top = Layout::default()
+    let cols = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Ratio(2, 5), Constraint::Ratio(3, 5)])
+        .constraints([Constraint::Ratio(3, 10), Constraint::Ratio(7, 10)])
         .split(rows[0]);
+    let preview_h = cols[1]
+        .height
+        .saturating_sub(10)
+        .min(11)
+        .max(8)
+        .min(cols[1].height.saturating_sub(6));
+    let right = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(6), Constraint::Length(preview_h)])
+        .split(cols[1]);
     PaneRects {
-        tree: top[0],
-        inspector: top[1],
-        preview: rows[1],
-        log: rows[2],
+        tree: cols[0],
+        inspector: right[0],
+        preview: right[1],
+        log: rows[1],
     }
 }
 
@@ -151,6 +165,21 @@ mod tests {
         assert!(panes.preview.height >= 5);
         assert!(panes.log.height >= 3);
         assert!(panes.tree.width >= 24);
+    }
+
+    #[test]
+    fn classic_tree_spans_inspector_and_preview() {
+        let state = demo_state();
+        let panes = split(LayoutId::ClassicStack, Rect::new(0, 0, 120, 40), &state);
+        assert_eq!(panes.tree.y, panes.inspector.y);
+        assert_eq!(panes.preview.x, panes.inspector.x);
+        assert!(panes.preview.y >= panes.inspector.y + panes.inspector.height);
+        assert_eq!(
+            panes.tree.height,
+            panes.inspector.height + panes.preview.height
+        );
+        assert!(panes.log.width >= panes.tree.width + panes.inspector.width);
+        assert!(panes.preview.height >= 8);
     }
 
     #[test]

@@ -6,7 +6,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 pub fn draw_header(f: &mut Frame, state: &AppState, area: Rect) {
-    let mut title = "dd_pantheon".to_string();
+    let mut title = ">_ dd_pantheon".to_string();
     if state.demo && area.width >= 40 {
         title.push_str("  DEMO");
     }

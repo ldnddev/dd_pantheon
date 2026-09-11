@@ -685,6 +685,71 @@ pub fn draw_backup_pick(
     f.render_widget(p, area);
 }
 
+pub fn draw_filter(f: &mut Frame, state: &AppState, area: Rect, query: &str, selected: usize) {
+    let theme = &state.theme;
+    let hits = state.filter_hits(query);
+    let block = Block::default()
+        .title("Filter sites")
+        .borders(Borders::ALL)
+        .border_style(theme.input_border_focus)
+        .style(theme.modal);
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Min(3),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+
+    let input = Paragraph::new(Line::from(vec![
+        Span::styled("/", theme.modal_label),
+        Span::styled(query.to_string(), theme.input_text_focus),
+    ]));
+    f.render_widget(input, chunks[0]);
+
+    let mut lines: Vec<Line> = Vec::new();
+    if hits.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "no sites match name or tag",
+            theme.warning_style,
+        )));
+    } else {
+        let start = selected.saturating_sub(8);
+        for (i, hit) in hits.iter().enumerate().skip(start).take(16) {
+            let marker = if i == selected { "> " } else { "  " };
+            let style = if i == selected {
+                theme.active_label
+            } else {
+                theme.modal_text
+            };
+            let name = match &hit.env {
+                Some(env) => format!("{}.{}", hit.site, env),
+                None => hit.site.clone(),
+            };
+            let mut spans = vec![
+                Span::styled(marker.to_string(), style),
+                Span::styled(name, style),
+            ];
+            for tag in hit.tags.iter().take(4) {
+                spans.push(Span::styled(format!(" [{tag}]"), theme.modal_label));
+            }
+            lines.push(Line::from(spans));
+        }
+    }
+    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), chunks[1]);
+    let hint = format!(
+        "{} matches   type name or tag   ↑↓ select   Enter jump   Esc close",
+        hits.len()
+    );
+    f.render_widget(
+        Paragraph::new(Span::styled(hint, theme.secondary)),
+        chunks[2],
+    );
+}
+
 pub fn draw_palette(
     f: &mut Frame,
     state: &AppState,
@@ -701,12 +766,16 @@ pub fn draw_palette(
     let hits = crate::workflows::palette::matches_for(state, query);
     let mut lines = vec![
         Line::from(Span::styled(
-            "Command palette",
+            "Terminus / Lando commands",
             theme.modal_header.add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "type a command, tool, or related term (cache, deploy, wp, pull…)",
+            theme.secondary,
         )),
         Line::from(""),
         Line::from(vec![
-            Span::styled("> ", theme.modal_label),
+            Span::styled(": ", theme.modal_label),
             Span::styled(query.to_string(), theme.input_text_focus),
         ]),
         Line::from(""),
@@ -722,13 +791,9 @@ pub fn draw_palette(
             } else {
                 theme.modal_text
             };
-            let kind = match entry.kind {
-                crate::catalog::CatalogKind::Workflow => "wf",
-                crate::catalog::CatalogKind::Palette => "pl",
-                crate::catalog::CatalogKind::Hidden => "hd",
-            };
+            let tool = entry.tool.binary_name();
             lines.push(Line::from(Span::styled(
-                format!("{marker}{:<22} {kind}  {}", entry.name, entry.description),
+                format!("{marker}{tool:<8} {:<22} {}", entry.name, entry.description),
                 style,
             )));
         }

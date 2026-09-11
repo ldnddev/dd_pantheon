@@ -7,13 +7,14 @@ use std::path::{Path, PathBuf};
 pub const THEME_FILE_NAME: &str = "dd_pantheon_theme.yml";
 pub const SUPPORTED_THEME_VERSION: u64 = 1;
 
-pub const DEFAULT_HEADER_QUOTES: [&str; 6] = [
+pub const DEFAULT_HEADER_QUOTES: [&str; 7] = [
     "Dev, then Test, then Live. In that order.",
     "The command is the product.",
     "Never --yes in the dark.",
     "A cockpit that teaches Terminus.",
     "Lando locally. Terminus remotely. Git in between.",
     "LiveGate: type the word, then we talk.",
+    "Wait, is it Terminus or Treminus? Let's go with both.",
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

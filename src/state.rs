@@ -80,6 +80,7 @@ pub enum Modal {
     },
     Filter {
         query: String,
+        selected: usize,
     },
     TagAdd {
         value: String,
@@ -382,6 +383,26 @@ pub struct PeriodHit {
     pub area: Rect,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PreviewButton {
+    Process,
+    Copy,
+    Cancel,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct PreviewButtonHit {
+    pub button: PreviewButton,
+    pub area: Rect,
+}
+
+#[derive(Clone, Debug)]
+pub struct FilterHit {
+    pub site: String,
+    pub env: Option<String>,
+    pub tags: Vec<String>,
+}
+
 #[derive(Clone, Debug)]
 pub struct TreeRow {
     pub depth: u16,
@@ -400,6 +421,7 @@ pub struct AppState {
     pub theme: Theme,
     pub theme_status: ThemeStatus,
     pub header_copy: String,
+    pub session_started: String,
     pub demo: bool,
     pub layout: LayoutId,
     pub focus: FocusPane,
@@ -466,6 +488,7 @@ pub struct AppState {
     pub pending_connection_set: Option<(String, String, String)>,
     pub metrics_error: Option<String>,
     pub period_hits: Vec<PeriodHit>,
+    pub preview_buttons: Vec<PreviewButtonHit>,
     pub org_prompted: HashSet<String>,
     pub selected_chip: Option<String>,
     pub tag_chips: Vec<TagChipHit>,
@@ -489,6 +512,7 @@ impl AppState {
 
         let mut state = Self {
             header_copy: String::new(),
+            session_started: chrono::Local::now().format("%Y-%m-%d").to_string(),
             demo: true,
             layout,
             focus: FocusPane::Tree,
@@ -551,6 +575,7 @@ impl AppState {
             pending_connection_set: None,
             metrics_error: None,
             period_hits: Vec::new(),
+            preview_buttons: Vec::new(),
             org_prompted: HashSet::new(),
             selected_chip: None,
             tag_chips: Vec::new(),
@@ -877,6 +902,60 @@ impl AppState {
         self.selected_site()
             .and_then(|s| s.local.as_ref().map(|l| l.path.clone()))
     }
+
+    pub fn connection_status(&self) -> &'static str {
+        if self.demo {
+            return "DEMO";
+        }
+        match self.auth {
+            AuthState::LoggedIn { .. } => "CONNECTED",
+            AuthState::LoggedOut => "DISCONNECTED",
+            AuthState::Unknown => "UNKNOWN",
+        }
+    }
+
+    /// Sites (and matching envs) for the `/` filter modal.
+    pub fn filter_hits(&self, query: &str) -> Vec<FilterHit> {
+        let filter = query.to_ascii_lowercase();
+        let tag_filter = self.tag_filter.as_deref();
+        let mut hits = Vec::new();
+        for site in &self.sites {
+            let site_ok = site_matches(site, &filter, tag_filter);
+            let envs = self.envs.get(&site.name).cloned().unwrap_or_default();
+            let matching_envs: Vec<_> = envs
+                .iter()
+                .filter(|e| env_matches(e, &filter))
+                .cloned()
+                .collect();
+            if site_ok {
+                hits.push(FilterHit {
+                    site: site.name.clone(),
+                    env: None,
+                    tags: site.tags.iter().map(|t| t.name.clone()).collect(),
+                });
+                if !filter.is_empty() {
+                    for env in matching_envs {
+                        if !site_matches(site, &filter, None) {
+                            hits.push(FilterHit {
+                                site: site.name.clone(),
+                                env: Some(env.id),
+                                tags: Vec::new(),
+                            });
+                        }
+                    }
+                }
+            } else if !matching_envs.is_empty() {
+                for env in matching_envs {
+                    hits.push(FilterHit {
+                        site: site.name.clone(),
+                        env: Some(env.id),
+                        tags: site.tags.iter().map(|t| t.name.clone()).collect(),
+                    });
+                }
+            }
+        }
+        hits
+    }
 }
 
 fn site_matches(site: &Site, filter: &str, tag: Option<&str>) -> bool {
@@ -897,6 +976,10 @@ fn site_matches(site: &Site, filter: &str, tag: Option<&str>) -> bool {
             .tags
             .iter()
             .any(|t| t.name.to_ascii_lowercase().contains(filter))
+        || site
+            .orgs
+            .iter()
+            .any(|o| o.org_name.to_ascii_lowercase().contains(filter))
 }
 
 fn env_matches(env: &Env, filter: &str) -> bool {

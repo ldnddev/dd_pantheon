@@ -7,6 +7,7 @@ header_quotes:
   - "A cockpit that teaches Terminus."
   - "Lando locally. Terminus remotely. Git in between."
   - "LiveGate: type the word, then we talk."
+  - "Wait, is it Terminus or Treminus? Let's go with both."
 
 colors:
   base_background: "#0F1114"

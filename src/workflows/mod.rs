@@ -345,6 +345,23 @@ pub fn start_doctor_jobs(state: &mut AppState) {
     }
 }
 
+pub fn unstage(state: &mut AppState) {
+    if state.current.is_none() {
+        state.show_toast(ToastLevel::Info, "no plan staged");
+        return;
+    }
+    state.current = None;
+    state.show_toast(ToastLevel::Info, "plan cancelled");
+}
+
+pub fn cancel_preview_or_job(state: &mut AppState) {
+    if state.job_running {
+        cancel_jobs(state);
+    } else {
+        unstage(state);
+    }
+}
+
 pub fn cancel_jobs(state: &mut AppState) {
     let mut any = false;
     let mut lando = false;

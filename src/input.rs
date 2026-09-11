@@ -1,5 +1,5 @@
 use crate::models::InspectorTab;
-use crate::state::{AppState, CmsFocus, CreateField, FocusPane, Modal, PaletteForm};
+use crate::state::{AppState, CmsFocus, CreateField, FocusPane, Modal, PaletteForm, PreviewButton};
 use crate::toast::ToastLevel;
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -88,6 +88,10 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
             crate::workflows::palette::open(state);
             return Ok(false);
         }
+        KeyCode::Char('/') => {
+            open_filter(state);
+            return Ok(false);
+        }
         KeyCode::Tab => {
             state.focus = if key.modifiers.contains(KeyModifiers::SHIFT) {
                 state.focus.prev()
@@ -101,10 +105,14 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
             return Ok(false);
         }
         KeyCode::Esc => {
-            state.filter.clear();
-            state.tag_filter = None;
-            state.rebuild_tree();
-            state.select_matching_row();
+            if !state.filter.is_empty() || state.tag_filter.is_some() {
+                state.filter.clear();
+                state.tag_filter = None;
+                state.rebuild_tree();
+                state.select_matching_row();
+            } else if state.current.is_some() {
+                crate::workflows::unstage(state);
+            }
             return Ok(false);
         }
         _ => {}
@@ -120,27 +128,54 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
 
 fn handle_modal(state: &mut AppState, key: KeyEvent, modal: Modal) -> Result<bool> {
     match modal {
-        Modal::Filter { mut query } => match key.code {
+        Modal::Filter {
+            mut query,
+            mut selected,
+        } => match key.code {
             KeyCode::Esc => {
                 state.modal = None;
             }
             KeyCode::Enter => {
+                let hits = state.filter_hits(&query);
                 state.filter = query;
                 state.modal = None;
+                if let Some(hit) = hits.get(selected) {
+                    state.expanded.insert(hit.site.clone());
+                    state.selected = match &hit.env {
+                        Some(env) => crate::state::TreeSel::Env {
+                            site: hit.site.clone(),
+                            env: env.clone(),
+                        },
+                        None => crate::state::TreeSel::Site(hit.site.clone()),
+                    };
+                }
                 state.rebuild_tree();
                 state.select_matching_row();
+            }
+            KeyCode::Down => {
+                let len = state.filter_hits(&query).len();
+                if len > 0 {
+                    selected = (selected + 1).min(len - 1);
+                }
+                state.modal = Some(Modal::Filter { query, selected });
+            }
+            KeyCode::Up => {
+                selected = selected.saturating_sub(1);
+                state.modal = Some(Modal::Filter { query, selected });
             }
             KeyCode::Backspace => {
                 query.pop();
                 state.filter = query.clone();
                 state.rebuild_tree();
-                state.modal = Some(Modal::Filter { query });
+                selected = selected.min(state.filter_hits(&query).len().saturating_sub(1));
+                state.modal = Some(Modal::Filter { query, selected });
             }
             KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                 query.push(c);
                 state.filter = query.clone();
                 state.rebuild_tree();
-                state.modal = Some(Modal::Filter { query });
+                selected = 0;
+                state.modal = Some(Modal::Filter { query, selected });
             }
             _ => {}
         },
@@ -1239,11 +1274,6 @@ fn handle_tree(state: &mut AppState, key: KeyEvent) -> Result<bool> {
             state.toggle_expand();
         }
         KeyCode::Enter => state.expand_or_select(),
-        KeyCode::Char('/') => {
-            state.modal = Some(Modal::Filter {
-                query: state.filter.clone(),
-            });
-        }
         KeyCode::Char('T') => crate::workflows::tags::open_tag_picker(state),
         other => shared_action_keys(state, other),
     }
@@ -1254,20 +1284,24 @@ fn handle_inspector(state: &mut AppState, key: KeyEvent) -> Result<bool> {
     match key.code {
         KeyCode::Char('j') | KeyCode::Down => {
             if state.layout == crate::models::LayoutId::TabbedInspector
+                && state.inspector_tab == InspectorTab::Actions
+            {
+                state.move_actions(1);
+            } else if state.layout == crate::models::LayoutId::TabbedInspector
                 && state.inspector_tab != InspectorTab::Actions
             {
                 state.inspector_scroll = state.inspector_scroll.saturating_add(1);
             } else {
-                state.move_actions(1);
+                state.inspector_scroll = state.inspector_scroll.saturating_add(1);
             }
         }
         KeyCode::Char('k') | KeyCode::Up => {
             if state.layout == crate::models::LayoutId::TabbedInspector
-                && state.inspector_tab != InspectorTab::Actions
+                && state.inspector_tab == InspectorTab::Actions
             {
-                state.inspector_scroll = state.inspector_scroll.saturating_sub(1);
-            } else {
                 state.move_actions(-1);
+            } else {
+                state.inspector_scroll = state.inspector_scroll.saturating_sub(1);
             }
         }
         KeyCode::Enter => {
@@ -1304,11 +1338,6 @@ fn handle_inspector(state: &mut AppState, key: KeyEvent) -> Result<bool> {
             if let Some(tag) = state.selected_chip.clone() {
                 crate::workflows::tags::stage_remove(state, &tag);
             }
-        }
-        KeyCode::Char('/') => {
-            state.modal = Some(Modal::Filter {
-                query: state.filter.clone(),
-            });
         }
         other => shared_action_keys(state, other),
     }
@@ -1448,6 +1477,14 @@ pub fn handle_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
                 }
             } else if contains(state.preview_area, x, y) {
                 state.focus = FocusPane::Preview;
+                let buttons = state.preview_buttons.clone();
+                if let Some(hit) = buttons.iter().find(|h| contains(h.area, x, y)) {
+                    match hit.button {
+                        PreviewButton::Process => crate::workflows::request_run(state),
+                        PreviewButton::Copy => copy_preview(state),
+                        PreviewButton::Cancel => crate::workflows::cancel_preview_or_job(state),
+                    }
+                }
             } else if contains(state.log_area, x, y) {
                 state.focus = FocusPane::Log;
             }
@@ -1498,6 +1535,13 @@ fn hit_pane(state: &AppState, x: u16, y: u16) -> Option<FocusPane> {
     } else {
         None
     }
+}
+
+fn open_filter(state: &mut AppState) {
+    state.modal = Some(Modal::Filter {
+        query: state.filter.clone(),
+        selected: 0,
+    });
 }
 
 fn is_quit_key(key: KeyEvent) -> bool {

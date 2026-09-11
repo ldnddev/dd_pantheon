@@ -112,6 +112,14 @@ impl Framework {
         }
     }
 
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::WordPress => "WordPress",
+            Self::Drupal => "Drupal",
+            Self::Other => "other",
+        }
+    }
+
     pub fn short(self) -> &'static str {
         match self {
             Self::WordPress => "wp",

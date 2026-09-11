@@ -5,7 +5,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Paragraph, Wrap};
+use ratatui::widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap};
 
 pub fn draw(f: &mut Frame, state: &mut AppState, area: Rect) {
     if area.height == 0 {
@@ -19,8 +19,10 @@ pub fn draw(f: &mut Frame, state: &mut AppState, area: Rect) {
 
 fn inspector_title(state: &AppState) -> String {
     let mut title = match &state.selected {
-        crate::state::TreeSel::Env { site, env } => format!("Inspector — {site}.{env}"),
-        crate::state::TreeSel::Site(site) => format!("Inspector — {site}"),
+        crate::state::TreeSel::Env { site, env } => {
+            format!("Inspector: {site} [{env}]")
+        }
+        crate::state::TreeSel::Site(site) => format!("Inspector: {site}"),
         crate::state::TreeSel::None => "Inspector".to_string(),
     };
     if state.demo {
@@ -41,18 +43,26 @@ fn draw_stacked(f: &mut Frame, state: &mut AppState, area: Rect) {
         return;
     }
 
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(4),
-            Constraint::Length(inner.height.saturating_div(3).clamp(4, 8)),
-            Constraint::Length(6.min(inner.height.saturating_sub(6)).max(3)),
-        ])
-        .split(inner);
-
-    draw_info(f, state, chunks[0]);
-    crate::ui::metrics::draw(f, state, chunks[1], false);
-    crate::ui::actions::draw(f, state, chunks[2], "actions");
+    if inner.width >= 56 {
+        let cols = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Ratio(11, 20), Constraint::Ratio(9, 20)])
+            .split(inner);
+        let right = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Length(1), Constraint::Min(12)])
+            .split(cols[1]);
+        draw_info(f, state, cols[0]);
+        crate::ui::metrics::draw_dashboard(f, state, right[1]);
+    } else {
+        let metrics_h = inner.height.saturating_div(2).clamp(5, 10);
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(4), Constraint::Length(metrics_h)])
+            .split(inner);
+        draw_info(f, state, chunks[0]);
+        crate::ui::metrics::draw_dashboard(f, state, chunks[1]);
+    }
 }
 
 fn draw_tabbed(f: &mut Frame, state: &mut AppState, area: Rect) {
@@ -114,7 +124,12 @@ fn draw_info(f: &mut Frame, state: &mut AppState, area: Rect) {
         }
     }
     if let Some(site) = state.selected_site().cloned() {
-        lines.push(kv(state, "framework", site.framework.label()));
+        let framework = site
+            .upstream_label
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| site.framework.display_name());
+        lines.push(kv(state, "framework", framework));
         if site.frozen {
             lines.push(kv(state, "status", "frozen"));
         }
@@ -142,8 +157,16 @@ fn draw_info(f: &mut Frame, state: &mut AppState, area: Rect) {
         if let Some(plan) = &site.plan_name {
             lines.push(kv(state, "plan", plan));
         }
-        if let Some(up) = site.upstream_label.as_ref().or(site.upstream.as_ref()) {
-            lines.push(kv(state, "upstream", up));
+        if let Some(up) = site.upstream.as_ref() {
+            let same_as_framework = up.eq_ignore_ascii_case(site.framework.label())
+                || up.eq_ignore_ascii_case(site.framework.display_name());
+            let same_as_label = site
+                .upstream_label
+                .as_ref()
+                .is_some_and(|l| l.eq_ignore_ascii_case(up));
+            if !same_as_framework && !same_as_label {
+                lines.push(kv(state, "upstream", up));
+            }
         }
         if let Some(region) = &site.region {
             lines.push(kv(state, "region", region));
@@ -151,11 +174,12 @@ fn draw_info(f: &mut Frame, state: &mut AppState, area: Rect) {
         lines.push(kv(state, "id", &site.id));
     }
     if let Some(env) = state.selected_env() {
-        lines.push(kv(state, "env", &env.id));
-        lines.push(kv(state, "mode", env.connection_mode.label()));
         if let Some(d) = &env.domain {
-            lines.push(kv(state, "domain", d));
+            lines.push(kv(state, "url", &display_url(d)));
+        } else {
+            lines.push(kv(state, "url", "—"));
         }
+        lines.push(kv(state, "mode", env.connection_mode.label()));
         if env.locked {
             lines.push(kv(state, "lock", "locked"));
         }
@@ -243,13 +267,10 @@ fn draw_info(f: &mut Frame, state: &mut AppState, area: Rect) {
         ));
     }
 
-    let p = Paragraph::new(lines)
-        .wrap(Wrap { trim: true })
-        .scroll((state.inspector_scroll, 0));
-    f.render_widget(p, area);
+    render_scrollable_lines(f, state, area, lines);
 }
 
-fn draw_local(f: &mut Frame, state: &AppState, area: Rect) {
+fn draw_local(f: &mut Frame, state: &mut AppState, area: Rect) {
     let mut lines = Vec::new();
     if let Some(local) = state.selected_site().and_then(|s| s.local.as_ref()) {
         lines.push(kv(state, "path", &local.path.display().to_string()));
@@ -288,7 +309,44 @@ fn draw_local(f: &mut Frame, state: &AppState, area: Rect) {
             state.theme.secondary,
         )));
     }
-    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), area);
+    render_scrollable_lines(f, state, area, lines);
+}
+
+fn render_scrollable_lines(
+    f: &mut Frame,
+    state: &mut AppState,
+    area: Rect,
+    lines: Vec<Line<'static>>,
+) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let content_h = visual_height(&lines, area.width);
+    let max_scroll = content_h.saturating_sub(area.height as usize);
+    if state.inspector_scroll as usize > max_scroll {
+        state.inspector_scroll = max_scroll as u16;
+    }
+    let p = Paragraph::new(lines)
+        .wrap(Wrap { trim: true })
+        .scroll((state.inspector_scroll, 0));
+    f.render_widget(p, area);
+    if content_h > area.height as usize {
+        let mut sb =
+            ScrollbarState::new(content_h.max(1)).position(state.inspector_scroll as usize);
+        f.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight).style(state.theme.scrollbar),
+            area,
+            &mut sb,
+        );
+    }
+}
+
+fn visual_height(lines: &[Line], width: u16) -> usize {
+    let cols = width.max(1) as usize;
+    lines
+        .iter()
+        .map(|line| line.width().max(1).div_ceil(cols))
+        .sum()
 }
 
 fn tag_chips_line(
@@ -348,10 +406,34 @@ fn kv(state: &AppState, key: &str, value: &str) -> Line<'static> {
     ])
 }
 
+fn display_url(domain: &str) -> String {
+    if domain.starts_with("http://") || domain.starts_with("https://") {
+        domain.to_string()
+    } else {
+        format!("https://{domain}")
+    }
+}
+
 fn summary_line(state: &AppState) -> String {
     match &state.selected {
         crate::state::TreeSel::Env { site, env } => format!("{site}.{env}"),
         crate::state::TreeSel::Site(site) => site.clone(),
         crate::state::TreeSel::None => "no selection".into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn visual_height_counts_wrapped_and_empty_lines() {
+        let lines = vec![
+            Line::from("short"),
+            Line::from(""),
+            Line::from("abcdefghijklmnopqrstuvwxyz"),
+        ];
+        assert_eq!(visual_height(&lines, 10), 1 + 1 + 3);
+        assert_eq!(visual_height(&lines, 80), 3);
     }
 }

@@ -14,7 +14,14 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect, scroll: u16) {
     lines.push(line("Ctrl+Q", "Quit"));
     lines.push(line("Tab / S-Tab", "Cycle panes"));
     lines.push(line("Esc", "Close modal / clear filter"));
-    lines.push(line(":", "Palette (fuzzy catalog; never auto-runs)"));
+    lines.push(line(
+        "/",
+        "Filter sites by name or tag (modal list; Enter jumps)",
+    ));
+    lines.push(line(
+        ":",
+        "Terminus/Lando commands (type a name or related term)",
+    ));
     lines.push(line("Ctrl+K", "Palette"));
     lines.push(line("Ctrl+L", "Login (machine token)"));
     lines.push(line("Actions", "Logout when logged in (Mutating)"));
@@ -40,7 +47,7 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect, scroll: u16) {
         "Stage env:clear-cache (tree/inspector; not preview)",
     ));
     lines.push(line("s / S", "lando start / stop (local bound)"));
-    lines.push(line("/", "Filter"));
+    lines.push(line("/", "Filter sites (name / tag)"));
     lines.push(line("T", "Tag filter picker (again clears)"));
     lines.push(line("a", "Add tag"));
     lines.push(line("n", "Create site wizard (org + name + upstream)"));
@@ -56,7 +63,7 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect, scroll: u16) {
     lines.push(line("[ / ]", "Cycle tag chips (inspector)"));
 
     push_header(&mut lines, state, "Inspector");
-    lines.push(line("j/k", "Move Actions / scroll"));
+    lines.push(line("j/k", "Scroll inspector (C: Actions / tabs)"));
     lines.push(line("Enter", "Stage action (demo: no spawn); wake is here"));
     lines.push(line("1-4", "C tabs: Info Metrics Local Actions"));
     lines.push(line(
@@ -68,14 +75,22 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect, scroll: u16) {
     push_header(&mut lines, state, "Preview / log");
     lines.push(line(
         "Enter",
-        "Run plan (gates apply). --demo never spawns user plans",
+        "PROCESS COMMAND — run plan (gates apply; --demo never spawns)",
     ));
     lines.push(line(
         "y",
-        "Copy redacted argv (wl-copy/xclip; preview focus)",
+        "COPY TO CLIPBOARD (redacted argv; preview focus)",
+    ));
+    lines.push(line(
+        "Esc",
+        "CANCEL staged plan when filter is already clear",
     ));
     lines.push(line("c", "no-op in preview (not copy, not clear-cache)"));
     lines.push(line("j/k", "Scroll"));
+    lines.push(line(
+        "click",
+        "Process / Copy / Cancel buttons in command preview",
+    ));
 
     push_header(&mut lines, state, "Mouse");
     lines.push(line(
@@ -86,7 +101,7 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect, scroll: u16) {
 
     push_header(&mut lines, state, "Layouts");
     lines.push(Line::from(
-        "A Classic stack (default): sites|inspector, preview, log",
+        "A Classic stack (default): sites | inspector / command preview; log full width",
     ));
     lines.push(Line::from(
         "B Three-column: sites | inspector | preview/log",
