@@ -20,7 +20,7 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect, scroll: u16) {
     ));
     lines.push(line(
         ":",
-        "Terminus/Lando commands (type a name or related term)",
+        "Terminus/Lando commands (type `lando` to filter; non-init Lando is grayed without a Pantheon .lando.yml)",
     ));
     lines.push(line("Ctrl+K", "Palette"));
     lines.push(line("Ctrl+L", "Login (machine token)"));

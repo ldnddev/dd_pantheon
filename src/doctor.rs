@@ -109,11 +109,18 @@ pub fn run_doctor(include_in_app_lando: bool, local_cwd: Option<&Path>) -> Docto
             .push("terminus not on PATH — inventory, login, and palette disabled".into());
     }
 
+    crate::catalog::ensure_lando_catalog(&mut report.catalog);
     if let Some(lando) = &report.tools.lando {
         match run_output(&lando.path, &["--help"], None) {
             Ok(out) => {
                 let stdout = String::from_utf8_lossy(&out.stdout);
-                report.catalog.extend(parse_lando_help(&stdout));
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                let help = format!("{stdout}\n{stderr}");
+                for e in parse_lando_help(&help) {
+                    if !report.catalog.iter().any(|c| c.name == e.name) {
+                        report.catalog.push(e);
+                    }
+                }
             }
             Err(err) => report
                 .warnings

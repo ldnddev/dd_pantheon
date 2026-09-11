@@ -62,6 +62,24 @@ pub fn plan_whoami(terminus: PathBuf) -> CommandPlan {
     }
 }
 
+pub fn plan_lando_help(lando: PathBuf) -> CommandPlan {
+    CommandPlan {
+        tool: ToolKind::Lando,
+        binary: lando,
+        argv: vec!["--help".into()],
+        cwd: None,
+        why: "doctor: lando --help".into(),
+        safety: SafetyTier::ReadOnly,
+        target: PlanTarget::None,
+        dry_run: false,
+        timeout: Some(Duration::from_secs(15)),
+        expects_json: false,
+        extra_env: vec![],
+        redact: vec![],
+        confirm_with_yes: false,
+    }
+}
+
 pub fn plan_terminus_list(terminus: PathBuf) -> CommandPlan {
     CommandPlan {
         tool: ToolKind::Terminus,

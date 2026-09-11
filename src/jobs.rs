@@ -42,6 +42,7 @@ pub enum JobKind {
         tool: ToolKind,
     },
     DoctorList,
+    DoctorLandoHelp,
     DoctorWhoami,
     SiteList,
     EnvList {
@@ -97,6 +98,7 @@ impl JobKind {
             self,
             Self::DoctorVersion { .. }
                 | Self::DoctorList
+                | Self::DoctorLandoHelp
                 | Self::DoctorWhoami
                 | Self::SiteList
                 | Self::EnvList { .. }

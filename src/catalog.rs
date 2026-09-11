@@ -278,7 +278,37 @@ pub fn parse_lando_help(help: &str) -> Vec<CatalogEntry> {
     entries
 }
 
-fn lando_entry(name: &str, description: String) -> CatalogEntry {
+/// Core `lando` tasks plus Pantheon-recipe extras. Names always start with `lando `.
+pub const LANDO_CORE_COMMANDS: &[(&str, &str)] = &[
+    ("config", "Displays the lando configuration"),
+    ("destroy", "Destroys your app"),
+    ("exec", "Runs command(s) on a service"),
+    ("info", "Prints info about your app"),
+    ("init", "Initializes a Landofile"),
+    ("list", "Lists running lando apps and containers"),
+    ("logs", "Displays logs for your app"),
+    ("poweroff", "Spins down all lando related containers"),
+    ("rebuild", "Rebuilds your app from scratch, preserving data"),
+    ("restart", "Restarts your app"),
+    ("start", "Starts your app"),
+    ("stop", "Stops your app"),
+    ("update", "Updates lando"),
+    ("version", "Displays lando version information"),
+];
+
+const LANDO_PANTHEON_COMMANDS: &[(&str, &str)] = &[
+    ("pull", "Pull code/db/files from Pantheon"),
+    ("push", "Push code/db/files to Pantheon"),
+    ("terminus", "Run terminus inside the app"),
+    ("drush", "Run drush inside the app"),
+    ("wp", "Run wp-cli inside the app"),
+    ("composer", "Run composer inside the app"),
+    ("mysql", "Drop into a MySQL shell"),
+    ("db-import", "Import a database dump"),
+    ("db-export", "Export a database dump"),
+];
+
+pub fn lando_entry(name: &str, description: String) -> CatalogEntry {
     let full = format!("lando {name}");
     CatalogEntry {
         tool: ToolKind::Lando,
@@ -307,6 +337,13 @@ fn lando_entry(name: &str, description: String) -> CatalogEntry {
 }
 
 pub fn merge_pantheon_recipe_extras(catalog: &mut Vec<CatalogEntry>) {
+    for (cmd, desc) in LANDO_PANTHEON_COMMANDS {
+        let name = format!("lando {cmd}");
+        if catalog.iter().any(|e| e.name == name) {
+            continue;
+        }
+        catalog.push(lando_entry(cmd, (*desc).into()));
+    }
     for extra in PANTHEON_RECIPE_EXTRAS {
         let name = format!("lando {extra}");
         if catalog.iter().any(|e| e.name == name) {
@@ -316,13 +353,257 @@ pub fn merge_pantheon_recipe_extras(catalog: &mut Vec<CatalogEntry>) {
     }
 }
 
+pub fn seed_lando_catalog() -> Vec<CatalogEntry> {
+    let mut out: Vec<CatalogEntry> = LANDO_CORE_COMMANDS
+        .iter()
+        .map(|(cmd, desc)| lando_entry(cmd, (*desc).into()))
+        .collect();
+    merge_pantheon_recipe_extras(&mut out);
+    out
+}
+
+/// Insert missing built-in Lando commands. Names stay `lando <cmd>`.
+pub fn ensure_lando_catalog(catalog: &mut Vec<CatalogEntry>) {
+    for entry in seed_lando_catalog() {
+        if !catalog.iter().any(|e| e.name == entry.name) {
+            catalog.push(entry);
+        }
+    }
+}
+
+pub fn is_lando_init(name: &str) -> bool {
+    name.eq_ignore_ascii_case("lando init")
+}
+
+pub fn invocation_prefix(entry: &CatalogEntry) -> String {
+    match entry.tool {
+        ToolKind::Lando => {
+            if entry.name.starts_with("lando ") {
+                entry.name.clone()
+            } else {
+                format!("lando {}", entry.name)
+            }
+        }
+        ToolKind::Terminus => format!("terminus {}", entry.name),
+        ToolKind::Git => format!("git {}", entry.name),
+    }
+}
+
+/// Placeholder syntax, e.g. `terminus tag:add <site_name> <organization> <tag>`.
+pub fn command_usage(entry: &CatalogEntry) -> String {
+    let mut parts = vec![invocation_prefix(entry)];
+    for arg in &entry.arguments {
+        if arg.required {
+            parts.push(format!("<{}>", arg.name));
+        } else {
+            parts.push(format!("[{}]", arg.name));
+        }
+    }
+    let mut shown = 0usize;
+    for opt in &entry.options {
+        if shown >= 4 {
+            parts.push("[options]".into());
+            break;
+        }
+        let flag = if opt.name.starts_with('-') {
+            opt.name.clone()
+        } else {
+            format!("--{}", opt.name)
+        };
+        if opt.accept_value {
+            parts.push(format!("[{flag}=<value>]"));
+        } else {
+            parts.push(format!("[{flag}]"));
+        }
+        shown += 1;
+    }
+    if entry.arguments.is_empty() && entry.options.is_empty() {
+        parts.push("[options]".into());
+    }
+    parts.join(" ")
+}
+
+/// Live argv with empty fields kept as `<name>` so the operator sees remaining holes.
+pub fn command_preview(
+    entry: &CatalogEntry,
+    filled: &[(String, String)],
+    toggles: &[(String, bool)],
+) -> String {
+    let mut parts = vec![invocation_prefix(entry)];
+    for arg in &entry.arguments {
+        let val = filled
+            .iter()
+            .find(|(k, _)| k == &arg.name)
+            .map(|(_, v)| v.trim())
+            .unwrap_or("");
+        if val.is_empty() {
+            parts.push(format!("<{}>", arg.name));
+        } else {
+            parts.push(val.to_string());
+        }
+    }
+    if let Some(el) = filled
+        .iter()
+        .find(|(k, v)| (k == "--element" || k == "element") && !v.trim().is_empty())
+    {
+        parts.push(format!("--element={}", el.1.trim()));
+    }
+    for (flag, on) in toggles {
+        if *on {
+            parts.push(flag.clone());
+        }
+    }
+    if let Some((_, extra)) = filled
+        .iter()
+        .find(|(k, v)| k == "extra" && !v.trim().is_empty())
+    {
+        parts.push(extra.trim().to_string());
+    }
+    parts.join(" ")
+}
+
+/// Concrete example using filled values, then per-arg samples.
+pub fn command_example(entry: &CatalogEntry, filled: &[(String, String)]) -> String {
+    if let Some(fixed) = curated_example(entry) {
+        if filled.iter().all(|(_, v)| v.trim().is_empty()) {
+            return fixed.to_string();
+        }
+    }
+    let mut parts = vec![invocation_prefix(entry)];
+    for arg in &entry.arguments {
+        let val = filled
+            .iter()
+            .find(|(k, v)| k == &arg.name && !v.trim().is_empty())
+            .map(|(_, v)| v.as_str())
+            .unwrap_or_else(|| sample_value(&arg.name));
+        parts.push(val.to_string());
+    }
+    if let Some(extra) = filled
+        .iter()
+        .find(|(k, v)| k == "extra" && !v.trim().is_empty())
+    {
+        parts.push(extra.1.clone());
+    } else if let Some(tail) = curated_extra(entry) {
+        parts.push(tail.to_string());
+    }
+    parts.join(" ")
+}
+
+pub fn arg_placeholder(name: &str) -> String {
+    match name {
+        "extra" => "type optional flags…  e.g. --note=\"deploy msg\"".into(),
+        "--element" | "element" => "type element…  all | code | database | files".into(),
+        "site_env" | "site_env_id" => "type site.env…  e.g. acme-wp.test".into(),
+        "site_name" => "type site machine name…  e.g. acme-wp".into(),
+        "organization" => "type org name or id…".into(),
+        "tag" => "type tag name…  e.g. production".into(),
+        "domain" => "type domain…  e.g. www.example.com".into(),
+        "mode" => "type mode…  git or sftp".into(),
+        _ => format!("type {name}…"),
+    }
+}
+
+pub fn arg_help(entry: &CatalogEntry, name: &str) -> String {
+    if name == "extra" {
+        return "Additional argv appended as typed. --yes is injected on confirm, not here.".into();
+    }
+    if let Some(arg) = entry.arguments.iter().find(|a| a.name == name) {
+        if !arg.description.trim().is_empty() {
+            return arg.description.clone();
+        }
+    }
+    if let Some(opt) = entry
+        .options
+        .iter()
+        .find(|o| o.name == name || o.name.trim_start_matches('-') == name.trim_start_matches('-'))
+    {
+        if !opt.description.trim().is_empty() {
+            return opt.description.clone();
+        }
+    }
+    fallback_arg_help(name).to_string()
+}
+
+pub fn sample_value(name: &str) -> &'static str {
+    match name {
+        "site_name" | "site" => "acme-wp",
+        "site_id" => "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        "site_env" | "site_env_id" => "acme-wp.test",
+        "organization" | "org" | "org_id" => "my-org",
+        "tag" => "production",
+        "to_environment" | "target_env" | "from_environment" => "live",
+        "domain" => "www.example.com",
+        "mode" => "git",
+        "name" => "feat-x",
+        "message" | "note" => "deploy from dd_pantheon",
+        "element" | "--element" => "all",
+        _ => "<value>",
+    }
+}
+
+fn fallback_arg_help(name: &str) -> &'static str {
+    match name {
+        "site_name" => "Pantheon site machine name.",
+        "site_id" => "Pantheon site UUID.",
+        "site_env" | "site_env_id" => "Site and environment as site.env.",
+        "organization" | "org" | "org_id" => "Organization name or UUID that owns the tag.",
+        "tag" => "Tag label to add or remove.",
+        "to_environment" | "target_env" => {
+            "Destination environment id (dev, test, live, or multidev)."
+        }
+        "from_environment" => "Source environment to copy from.",
+        "domain" => "Custom hostname to add or remove.",
+        "mode" => "Connection mode: git or sftp.",
+        "name" => "Multidev or site name.",
+        "element" | "--element" => "Backup element: all, code, database, or files.",
+        _ => "Required value for this command.",
+    }
+}
+
+fn curated_example(entry: &CatalogEntry) -> Option<&'static str> {
+    Some(match entry.name.as_str() {
+        "tag:add" => "terminus tag:add acme-wp my-org production",
+        "tag:remove" | "tag:rm" => "terminus tag:remove acme-wp my-org production",
+        "tag:list" => "terminus tag:list acme-wp my-org",
+        "env:deploy" => "terminus env:deploy acme-wp.test --updatedb --note=\"release\"",
+        "env:clone-content" => "terminus env:clone-content acme-wp.live dev --cc --updatedb",
+        "env:wipe" => "terminus env:wipe acme-wp.dev",
+        "env:clear-cache" => "terminus env:clear-cache acme-wp.live",
+        "backup:create" => "terminus backup:create acme-wp.test --element=all",
+        "backup:restore" => "terminus backup:restore acme-wp.dev --element=database",
+        "connection:set" => "terminus connection:set acme-wp.dev git",
+        "multidev:create" => "terminus multidev:create acme-wp feat-x",
+        "domain:add" => "terminus domain:add acme-wp.live www.example.com",
+        "remote:wp" => "terminus remote:wp acme-wp.live -- plugin list",
+        "remote:drush" => "terminus remote:drush acme-wp.live -- status",
+        "lando pull" => "lando pull --code=live --database=live --files=live",
+        "lando push" => "lando push --code --database=none --files=none",
+        "lando start" => "lando start",
+        "lando stop" => "lando stop",
+        "lando rebuild" => "lando rebuild -y",
+        "lando init" => "lando init --source pantheon",
+        _ => return None,
+    })
+}
+
+fn curated_extra(entry: &CatalogEntry) -> Option<&'static str> {
+    match entry.name.as_str() {
+        "lando pull" => Some("--code=live --database=live --files=live"),
+        "lando push" => Some("--code --database=none --files=none"),
+        "remote:wp" => Some("-- plugin list"),
+        "remote:drush" => Some("-- status"),
+        "env:deploy" => Some("--note=\"release\""),
+        _ => None,
+    }
+}
+
 pub fn visible<'a>(catalog: &'a [CatalogEntry]) -> impl Iterator<Item = &'a CatalogEntry> {
     catalog.iter().filter(|e| e.kind != CatalogKind::Hidden)
 }
 
 /// Small catalog so `--demo` palette can run without Terminus.
 pub fn demo_catalog() -> Vec<CatalogEntry> {
-    vec![
+    let base = vec![
         terminus(
             "env:deploy",
             "Deploy the current path onto a target environment",
@@ -388,14 +669,17 @@ pub fn demo_catalog() -> Vec<CatalogEntry> {
         lando_entry("destroy", "Destroy the local app".into()),
         lando_entry("push", "Push code/db/files to Pantheon".into()),
         lando_entry("start", "Start the local app".into()),
-    ]
+    ];
+    let mut out = base;
+    ensure_lando_catalog(&mut out);
+    out
 }
 
 fn req(name: &str) -> CatalogArg {
     CatalogArg {
         name: name.into(),
         required: true,
-        description: String::new(),
+        description: fallback_arg_help(name).into(),
     }
 }
 
@@ -519,6 +803,60 @@ Commands:
         let destroy = entries.iter().find(|e| e.name == "lando destroy").unwrap();
         assert_eq!(destroy.safety_hint, SafetyTier::Destructive);
         assert_eq!(destroy.kind, CatalogKind::Workflow);
+    }
+
+    #[test]
+    fn seed_lando_names_start_with_lando_and_include_init() {
+        let seeded = seed_lando_catalog();
+        assert!(seeded.iter().any(|e| e.name == "lando init"));
+        assert!(seeded.iter().any(|e| e.name == "lando start"));
+        assert!(seeded.iter().any(|e| e.name == "lando pull"));
+        assert!(
+            seeded
+                .iter()
+                .all(|e| e.tool == ToolKind::Lando && e.name.starts_with("lando "))
+        );
+        let mut catalog = vec![];
+        ensure_lando_catalog(&mut catalog);
+        let n = catalog.len();
+        ensure_lando_catalog(&mut catalog);
+        assert_eq!(catalog.len(), n, "ensure is idempotent");
+    }
+
+    #[test]
+    fn command_usage_and_example_cover_terminus_and_lando() {
+        let tag = terminus(
+            "tag:add",
+            "Adds a tag on a site within an organization.",
+            vec![req("site_name"), req("organization"), req("tag")],
+            &[],
+        );
+        assert_eq!(
+            command_usage(&tag),
+            "terminus tag:add <site_name> <organization> <tag>"
+        );
+        assert_eq!(
+            command_example(&tag, &[]),
+            "terminus tag:add acme-wp my-org production"
+        );
+        let filled = vec![
+            ("site_name".into(), "dd-wordpress".into()),
+            ("organization".into(), "ldnd".into()),
+            ("tag".into(), "test".into()),
+        ];
+        assert_eq!(
+            command_example(&tag, &filled),
+            "terminus tag:add dd-wordpress ldnd test"
+        );
+        let pull = lando_entry("pull", "Pull code/db/files from Pantheon".into());
+        assert!(command_usage(&pull).starts_with("lando pull"));
+        assert!(command_example(&pull, &[]).contains("lando pull"));
+        assert_eq!(arg_placeholder("tag"), "type tag name…  e.g. production");
+        assert_eq!(
+            command_preview(&tag, &filled, &[]),
+            "terminus tag:add dd-wordpress ldnd test"
+        );
+        assert!(command_preview(&tag, &[], &[]).contains("<tag>"));
     }
 
     #[test]

@@ -1,3 +1,4 @@
+use crate::catalog;
 use crate::models::OrgRef;
 use crate::plan::CommandPlan;
 use crate::state::{
@@ -752,17 +753,18 @@ pub fn draw_filter(f: &mut Frame, state: &AppState, area: Rect, query: &str, sel
 
 pub fn draw_palette(
     f: &mut Frame,
-    state: &AppState,
+    state: &mut AppState,
     area: Rect,
     query: &str,
     selected: usize,
     form: Option<&PaletteForm>,
 ) {
-    let theme = &state.theme;
     if let Some(form) = form {
-        draw_palette_form(f, theme, area, form);
+        draw_palette_form(f, state, area, form);
         return;
     }
+    state.form_field_hits.clear();
+    let theme = &state.theme;
     let hits = crate::workflows::palette::matches_for(state, query);
     let mut lines = vec![
         Line::from(Span::styled(
@@ -770,7 +772,7 @@ pub fn draw_palette(
             theme.modal_header.add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
-            "type a command, tool, or related term (cache, deploy, wp, pull…)",
+            "type a command, tool, or related term (lando, cache, deploy, wp…)",
             theme.secondary,
         )),
         Line::from(""),
@@ -786,14 +788,26 @@ pub fn draw_palette(
         let start = selected.saturating_sub(6);
         for (i, entry) in hits.iter().enumerate().skip(start).take(12) {
             let marker = if i == selected { "> " } else { "  " };
-            let style = if i == selected {
+            let disabled = !crate::workflows::palette::lando_command_enabled(state, &entry.name);
+            let style = if disabled {
+                Style::default()
+                    .fg(theme
+                        .colors
+                        .text_disabled
+                        .unwrap_or(theme.colors.text_secondary))
+                    .bg(theme.colors.modal_background)
+            } else if i == selected {
                 theme.active_label
             } else {
                 theme.modal_text
             };
-            let tool = entry.tool.binary_name();
+            let hint = if disabled {
+                "  (needs pantheon .lando.yml)"
+            } else {
+                ""
+            };
             lines.push(Line::from(Span::styled(
-                format!("{marker}{tool:<8} {:<22} {}", entry.name, entry.description),
+                format!("{marker}{:<22} {}{hint}", entry.name, entry.description),
                 style,
             )));
         }
@@ -814,55 +828,235 @@ pub fn draw_palette(
     f.render_widget(p, area);
 }
 
-fn draw_palette_form(f: &mut Frame, theme: &Theme, area: Rect, form: &PaletteForm) {
-    let mut lines = vec![
+fn draw_palette_form(f: &mut Frame, state: &mut AppState, area: Rect, form: &PaletteForm) {
+    let theme = state.theme.clone();
+    state.form_field_hits.clear();
+    let filled = palette_filled(form);
+    let function = if form.entry.description.trim().is_empty() {
+        "Run this Terminus or Lando command through preview → confirm.".to_string()
+    } else {
+        form.entry.description.clone()
+    };
+    let block = Block::default()
+        .title("Command")
+        .borders(Borders::ALL)
+        .border_style(theme.input_border_focus)
+        .style(theme.modal);
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let mut text_fields: Vec<(usize, String, String, String)> = Vec::new();
+    for (i, (name, value)) in form.args.iter().enumerate() {
+        text_fields.push((
+            i,
+            name.clone(),
+            value.clone(),
+            catalog::arg_placeholder(name),
+        ));
+    }
+    let mut focus_at = form.args.len() + form.toggles.len();
+    if let Some(el) = &form.element {
+        text_fields.push((
+            focus_at,
+            "--element".into(),
+            el.clone(),
+            catalog::arg_placeholder("--element"),
+        ));
+        focus_at += 1;
+    }
+    text_fields.push((
+        focus_at,
+        "extra".into(),
+        form.extra.clone(),
+        catalog::arg_placeholder("extra"),
+    ));
+
+    let header_h = 7.min(inner.height.saturating_sub(4));
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(header_h),
+            Constraint::Min(3),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+
+    let header = vec![
         Line::from(Span::styled(
             form.entry.name.clone(),
             theme.modal_header.add_modifier(Modifier::BOLD),
         )),
-        Line::from(Span::styled(
-            form.entry.description.clone(),
-            theme.secondary,
-        )),
+        Line::from(vec![
+            Span::styled("Function: ", theme.modal_label),
+            Span::styled(function, theme.modal_text),
+        ]),
+        Line::from(vec![
+            Span::styled("Usage:    ", theme.modal_label),
+            Span::styled(catalog::command_usage(&form.entry), theme.modal_text),
+        ]),
+        Line::from(vec![
+            Span::styled("Example:  ", theme.modal_label),
+            Span::styled(catalog::command_example(&form.entry, &[]), theme.secondary),
+        ]),
         Line::from(""),
+        Line::from(vec![
+            Span::styled("$ ", theme.modal_label),
+            Span::styled(
+                catalog::command_preview(&form.entry, &filled, &form.toggles),
+                theme.input_text_focus,
+            ),
+        ]),
     ];
-    for (i, (name, value)) in form.args.iter().enumerate() {
-        lines.push(field(theme, form.focused_arg() == Some(i), name, value));
+    f.render_widget(Paragraph::new(header).wrap(Wrap { trim: true }), chunks[0]);
+
+    let n_text = text_fields.len();
+    let n_tog = form.toggles.len();
+    let mut constraints: Vec<Constraint> = Vec::new();
+    for _ in 0..n_text {
+        constraints.push(Constraint::Length(3));
+    }
+    for _ in 0..n_tog {
+        constraints.push(Constraint::Length(1));
+    }
+    constraints.push(Constraint::Min(0));
+    let slots = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(constraints)
+        .split(chunks[1]);
+
+    for (slot_i, (focus, name, value, placeholder)) in text_fields.iter().enumerate() {
+        let field_area = slots[slot_i];
+        draw_text_input(
+            f,
+            &theme,
+            field_area,
+            name,
+            value,
+            placeholder,
+            form.focus == *focus,
+        );
+        state.form_field_hits.push(crate::state::FormFieldHit {
+            focus: *focus,
+            area: field_area,
+        });
     }
     for (i, (flag, on)) in form.toggles.iter().enumerate() {
-        let mark = if *on { "[x]" } else { "[ ]" };
+        let slot = slots[n_text + i];
         let focused = form.focused_toggle() == Some(i);
+        let mark = if *on { "[x]" } else { "[ ]" };
         let style = if focused {
             theme.input_text_focus
         } else {
             theme.modal_text
         };
         let marker = if focused { ">" } else { " " };
-        lines.push(Line::from(Span::styled(
-            format!("{marker} {mark} {flag}  (Space)"),
-            style,
-        )));
+        f.render_widget(
+            Paragraph::new(Span::styled(
+                format!("{marker} {mark} {flag}  (Space to toggle)"),
+                style,
+            )),
+            slot,
+        );
     }
-    if let Some(el) = &form.element {
-        lines.push(field(theme, form.focus_element(), "--element", el));
-    }
-    lines.push(field(theme, form.focus_extra(), "extra", &form.extra));
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "Tab fields  Enter stage (does not run)  Esc back",
-        theme.secondary,
-    )));
-    let p = Paragraph::new(lines).wrap(Wrap { trim: false }).block(
-        Block::default()
-            .title("Palette form")
-            .borders(Borders::ALL)
-            .border_style(theme.input_border_focus)
-            .style(theme.modal),
+
+    f.render_widget(
+        Paragraph::new(Span::styled(
+            "Tab fields and type.  Enter stages (does not run).  Esc back.",
+            theme.secondary,
+        )),
+        chunks[2],
     );
-    f.render_widget(p, area);
 }
 
-pub fn draw_cms(f: &mut Frame, theme: &Theme, area: Rect, form: &CmsForm) {
+fn draw_text_input(
+    f: &mut Frame,
+    theme: &Theme,
+    area: Rect,
+    label: &str,
+    value: &str,
+    placeholder: &str,
+    focused: bool,
+) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let border = if focused {
+        theme.input_border_focus
+    } else {
+        theme.input_border
+    };
+    let title = if focused {
+        theme.input_text_focus.add_modifier(Modifier::BOLD)
+    } else {
+        theme.modal_label
+    };
+    let block = Block::default()
+        .title(Line::from(Span::styled(format!(" {label} "), title)))
+        .borders(Borders::ALL)
+        .border_style(border)
+        .style(theme.modal);
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+    f.render_widget(
+        Paragraph::new(input_value_line(theme, value, placeholder, focused)),
+        inner,
+    );
+}
+
+fn input_value_line(theme: &Theme, value: &str, placeholder: &str, focused: bool) -> Line<'static> {
+    let caret = Span::styled(
+        "█",
+        Style::default()
+            .fg(theme.colors.cursor)
+            .add_modifier(Modifier::RAPID_BLINK),
+    );
+    if value.is_empty() {
+        let mut spans = Vec::new();
+        if focused && cursor_on() {
+            spans.push(caret);
+        } else if focused {
+            spans.push(Span::raw(" "));
+        }
+        spans.push(Span::styled(placeholder.to_string(), theme.secondary));
+        Line::from(spans)
+    } else {
+        let text = if focused {
+            theme.input_text_focus
+        } else {
+            theme.input_text
+        };
+        let mut spans = vec![Span::styled(value.to_string(), text)];
+        if focused && cursor_on() {
+            spans.push(caret);
+        } else if focused {
+            spans.push(Span::raw(" "));
+        }
+        Line::from(spans)
+    }
+}
+
+fn cursor_on() -> bool {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| (d.as_millis() / 400) % 2 == 0)
+        .unwrap_or(true)
+}
+
+fn palette_filled(form: &PaletteForm) -> Vec<(String, String)> {
+    let mut filled = form.args.clone();
+    if let Some(el) = &form.element {
+        filled.push(("--element".into(), el.clone()));
+    }
+    filled.push(("extra".into(), form.extra.clone()));
+    filled
+}
+
+pub fn draw_cms(f: &mut Frame, state: &mut AppState, area: Rect, form: &CmsForm) {
+    let theme = state.theme.clone();
+    state.form_field_hits.clear();
     let mark = |focused: bool| if focused { ">" } else { " " };
     let style = |focused: bool| {
         if focused {
@@ -871,15 +1065,52 @@ pub fn draw_cms(f: &mut Frame, theme: &Theme, area: Rect, form: &CmsForm) {
             theme.modal_text
         }
     };
-    let mut lines = vec![
+    let usage = match (form.target.label(), form.cms.label()) {
+        (t, "wp") if t.contains("lando") || t == "local" => "lando wp <command>",
+        (_, "wp") => "terminus remote:wp <site.env> -- <command>",
+        (t, _) if t.contains("lando") || t == "local" => "lando drush <command>",
+        _ => "terminus remote:drush <site.env> -- <command>",
+    };
+    let example = match form.cms.label() {
+        "wp" => "terminus remote:wp acme-wp.live -- plugin list",
+        _ => "terminus remote:drush acme-wp.live -- status",
+    };
+    let block = Block::default()
+        .title("CMS")
+        .borders(Borders::ALL)
+        .border_style(theme.input_border_focus)
+        .style(theme.modal);
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(8),
+            Constraint::Length(3),
+            Constraint::Min(3),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+    let header = vec![
         Line::from(Span::styled(
             "CMS command",
             theme.modal_header.add_modifier(Modifier::BOLD),
         )),
-        Line::from(Span::styled(
-            "one form — remote Terminus or local Lando. Never auto-inserts -y.",
-            theme.secondary,
-        )),
+        Line::from(vec![
+            Span::styled("Function: ", theme.modal_label),
+            Span::styled(
+                "Run WP-CLI or Drush remotely (Terminus) or locally (Lando). Never auto-inserts -y.",
+                theme.modal_text,
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("Usage:    ", theme.modal_label),
+            Span::styled(usage, theme.modal_text),
+        ]),
+        Line::from(vec![
+            Span::styled("Example:  ", theme.modal_label),
+            Span::styled(example, theme.secondary),
+        ]),
         Line::from(""),
         Line::from(Span::styled(
             format!(
@@ -897,44 +1128,48 @@ pub fn draw_cms(f: &mut Frame, theme: &Theme, area: Rect, form: &CmsForm) {
             ),
             style(form.focus == CmsFocus::Cms),
         )),
-        field(
-            theme,
-            form.focus == CmsFocus::Command,
-            "command",
-            &form.command,
-        ),
     ];
-    lines.push(Line::from(""));
-    let hist_style = if form.focus == CmsFocus::History {
-        theme.active_label
-    } else {
-        theme.secondary
-    };
-    lines.push(Line::from(Span::styled("history (↑↓)", hist_style)));
+    f.render_widget(Paragraph::new(header).wrap(Wrap { trim: true }), chunks[0]);
+    draw_text_input(
+        f,
+        &theme,
+        chunks[1],
+        "command",
+        &form.command,
+        "type a CMS command…  e.g. plugin list",
+        form.focus == CmsFocus::Command,
+    );
+    state.form_field_hits.push(crate::state::FormFieldHit {
+        focus: 2,
+        area: chunks[1],
+    });
+    let mut hist = vec![Line::from(Span::styled(
+        "history (↑↓)",
+        if form.focus == CmsFocus::History {
+            theme.active_label
+        } else {
+            theme.secondary
+        },
+    ))];
     for (i, line) in form.history.iter().take(8).enumerate() {
         let marker = if form.history_idx == Some(i) {
             "> "
         } else {
             "  "
         };
-        lines.push(Line::from(Span::styled(
+        hist.push(Line::from(Span::styled(
             format!("{marker}{line}"),
             theme.modal_text,
         )));
     }
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "Tab fields  Enter run  Esc cancel",
-        theme.secondary,
-    )));
-    let p = Paragraph::new(lines).wrap(Wrap { trim: false }).block(
-        Block::default()
-            .title("CMS")
-            .borders(Borders::ALL)
-            .border_style(theme.input_border_focus)
-            .style(theme.modal),
+    f.render_widget(Paragraph::new(hist), chunks[2]);
+    f.render_widget(
+        Paragraph::new(Span::styled(
+            "Tab fields and type.  Enter run.  Esc cancel.",
+            theme.secondary,
+        )),
+        chunks[3],
     );
-    f.render_widget(p, area);
 }
 
 fn field<'a>(theme: &'a Theme, focused: bool, key: &str, value: &str) -> Line<'a> {

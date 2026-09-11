@@ -211,7 +211,7 @@ fn draw_modal(f: &mut Frame, state: &mut AppState, area: Rect) {
             modals::draw_palette(f, state, modal_area, &query, selected, form.as_ref());
         }
         Some(Modal::Cms { form }) => {
-            modals::draw_cms(f, &state.theme, modal_area, &form);
+            modals::draw_cms(f, state, modal_area, &form);
         }
         Some(Modal::BackupPick {
             files,

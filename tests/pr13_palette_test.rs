@@ -3,7 +3,9 @@ use dd_pantheon::app::App;
 use dd_pantheon::config::{looks_like_machine_token, push_history};
 use dd_pantheon::plan::{SafetyTier, StagedPlan};
 use dd_pantheon::state::{CmsKind, CmsTarget, Modal, TreeSel};
-use dd_pantheon::workflows::palette::{PaletteArgs, RAW_PALETTE_WARNING, subsequence_match};
+use dd_pantheon::workflows::palette::{
+    PaletteArgs, RAW_PALETTE_WARNING, lando_command_enabled, subsequence_match,
+};
 use dd_pantheon::workflows::{cms, plan_from_catalog};
 use std::fs;
 use std::path::PathBuf;
@@ -134,6 +136,57 @@ fn unrouted_palette_warns_and_is_not_a_bypass() {
         }
         other => panic!("expected unrouted plan, got {other:?}"),
     }
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn colon_palette_includes_lando_prefixed_commands() {
+    let (mut app, root) = demo_app();
+    app.handle_key(key(KeyCode::Char(':'))).unwrap();
+    let lando: Vec<_> = app
+        .state
+        .catalog
+        .iter()
+        .filter(|e| e.tool == dd_pantheon::plan::ToolKind::Lando)
+        .map(|e| e.name.as_str())
+        .collect();
+    assert!(lando.contains(&"lando init"), "{lando:?}");
+    assert!(lando.contains(&"lando start"), "{lando:?}");
+    assert!(lando.contains(&"lando pull"), "{lando:?}");
+    assert!(lando.iter().all(|n| n.starts_with("lando ")), "{lando:?}");
+    assert!(lando_command_enabled(&app.state, "lando init"));
+    assert!(
+        lando_command_enabled(&app.state, "lando start"),
+        "demo acme-wp is a pantheon local"
+    );
+
+    app.handle_key(key(KeyCode::Esc)).unwrap();
+    app.state.selected = TreeSel::Site("frozen-lab".into());
+    assert!(lando_command_enabled(&app.state, "lando init"));
+    assert!(
+        !lando_command_enabled(&app.state, "lando start"),
+        "frozen-lab has no pantheon .lando.yml"
+    );
+    app.state.focus = dd_pantheon::state::FocusPane::Tree;
+    app.handle_key(key(KeyCode::Char(':'))).unwrap();
+    if let Some(Modal::Palette {
+        query, selected, ..
+    }) = &mut app.state.modal
+    {
+        *query = "lando start".into();
+        *selected = 0;
+    }
+    app.handle_key(key(KeyCode::Enter)).unwrap();
+    assert!(
+        matches!(app.state.modal, Some(Modal::Palette { form: None, .. })),
+        "grayed lando start must not open a form"
+    );
+    let toast = app.state.toast.as_ref().expect("toast");
+    assert!(
+        toast.message.contains("Pantheon .lando.yml"),
+        "{}",
+        toast.message
+    );
     let _ = fs::remove_dir_all(root);
 }
 

@@ -1,4 +1,4 @@
-use crate::catalog::{CatalogEntry, demo_catalog, visible};
+use crate::catalog::{CatalogEntry, demo_catalog, ensure_lando_catalog, is_lando_init, visible};
 use crate::config::push_history;
 use crate::models::Framework;
 use crate::plan::{CommandPlan, PlanTarget, SafetyTier, StagedPlan, ToolKind, WorkflowPlan};
@@ -229,6 +229,7 @@ pub fn open(state: &mut AppState) {
     if state.demo && state.catalog.is_empty() {
         state.catalog = demo_catalog();
     }
+    ensure_lando_catalog(&mut state.catalog);
     if state.catalog.is_empty() {
         state.show_toast(
             ToastLevel::Warning,
@@ -240,6 +241,55 @@ pub fn open(state: &mut AppState) {
         selected: 0,
         form: None,
     });
+}
+
+/// `lando init` is always available. Every other Lando command needs a
+/// Pantheon-recipe `.lando.yml` in the working directory (or the selected
+/// site's bound local path).
+pub fn lando_command_enabled(state: &AppState, name: &str) -> bool {
+    if !name.to_ascii_lowercase().starts_with("lando ") {
+        return true;
+    }
+    if is_lando_init(name) {
+        return true;
+    }
+    pantheon_lando_available(state)
+}
+
+pub fn pantheon_lando_available(state: &AppState) -> bool {
+    if let Some(local) = state.selected_site().and_then(|s| s.local.as_ref()) {
+        if local_is_pantheon(state, local) {
+            return true;
+        }
+    }
+    if let Some(path) = state.local_root_hint() {
+        if peek_is_pantheon(&path) {
+            return true;
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        if peek_is_pantheon(&cwd) {
+            return true;
+        }
+    }
+    false
+}
+
+fn local_is_pantheon(state: &AppState, local: &crate::models::LocalApp) -> bool {
+    let recipe_pantheon = local
+        .recipe
+        .as_deref()
+        .is_some_and(|r| r.eq_ignore_ascii_case("pantheon"));
+    if recipe_pantheon && state.demo {
+        return true;
+    }
+    peek_is_pantheon(&local.path)
+}
+
+fn peek_is_pantheon(path: &PathBuf) -> bool {
+    crate::tools::lando::peek_lando_yml(path)
+        .ok()
+        .is_some_and(|p| p.is_pantheon())
 }
 
 pub fn form_from_entry(state: &AppState, entry: &CatalogEntry) -> PaletteForm {
@@ -846,5 +896,12 @@ mod tests {
             !wipe.iter().any(|e| e.name == "remote:wp"),
             "wipe must not subsequence-match WordPress descriptions"
         );
+        let lando = filter_catalog(&catalog, "lando");
+        assert!(
+            lando.iter().all(|e| e.name.starts_with("lando ")),
+            "lando filter should only hit lando-prefixed names"
+        );
+        assert!(lando.iter().any(|e| e.name == "lando init"));
+        assert!(lando.iter().any(|e| e.name == "lando start"));
     }
 }

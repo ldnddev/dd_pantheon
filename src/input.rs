@@ -1068,6 +1068,18 @@ fn handle_palette(
                 .get(selected)
                 .map(|e| (*e).clone());
             if let Some(entry) = entry {
+                if !crate::workflows::palette::lando_command_enabled(state, &entry.name) {
+                    state.show_toast(
+                        ToastLevel::Warning,
+                        "lando commands need a Pantheon .lando.yml in the working directory (except lando init)",
+                    );
+                    state.modal = Some(Modal::Palette {
+                        query,
+                        selected,
+                        form: None,
+                    });
+                    return;
+                }
                 let form = crate::workflows::palette::form_from_entry(state, &entry);
                 state.modal = Some(Modal::Palette {
                     query,
@@ -1431,6 +1443,22 @@ pub fn handle_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
     let (x, y) = (mouse.column, mouse.row);
     if let Some(area) = state.modal_area {
         if contains(area, x, y) {
+            if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+                let hits = state.form_field_hits.clone();
+                if let Some(hit) = hits.iter().find(|h| contains(h.area, x, y)) {
+                    match &mut state.modal {
+                        Some(Modal::Palette {
+                            form: Some(form), ..
+                        }) => {
+                            form.focus = hit.focus;
+                        }
+                        Some(Modal::Cms { form }) => {
+                            form.focus = CmsFocus::Command;
+                        }
+                        _ => {}
+                    }
+                }
+            }
             if let MouseEventKind::ScrollDown | MouseEventKind::ScrollUp = mouse.kind {
                 let down = matches!(mouse.kind, MouseEventKind::ScrollDown);
                 match &mut state.modal {

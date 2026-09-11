@@ -333,6 +333,11 @@ pub fn start_doctor_jobs(state: &mut AppState) {
                 tool: crate::plan::ToolKind::Lando,
             },
         );
+        start_job(
+            state,
+            auth::plan_lando_help(t.path.clone()),
+            JobKind::DoctorLandoHelp,
+        );
     }
     if let Some(t) = &which.git {
         start_job(

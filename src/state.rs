@@ -396,6 +396,12 @@ pub struct PreviewButtonHit {
     pub area: Rect,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct FormFieldHit {
+    pub focus: usize,
+    pub area: Rect,
+}
+
 #[derive(Clone, Debug)]
 pub struct FilterHit {
     pub site: String,
@@ -489,6 +495,7 @@ pub struct AppState {
     pub metrics_error: Option<String>,
     pub period_hits: Vec<PeriodHit>,
     pub preview_buttons: Vec<PreviewButtonHit>,
+    pub form_field_hits: Vec<FormFieldHit>,
     pub org_prompted: HashSet<String>,
     pub selected_chip: Option<String>,
     pub tag_chips: Vec<TagChipHit>,
@@ -576,6 +583,7 @@ impl AppState {
             metrics_error: None,
             period_hits: Vec::new(),
             preview_buttons: Vec::new(),
+            form_field_hits: Vec::new(),
             org_prompted: HashSet::new(),
             selected_chip: None,
             tag_chips: Vec::new(),

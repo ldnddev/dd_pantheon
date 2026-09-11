@@ -383,12 +383,21 @@ fn apply_doctor_result(
                     .catalog
                     .retain(|e| e.tool != crate::plan::ToolKind::Terminus);
                 state.catalog.extend(entries);
+                crate::catalog::ensure_lando_catalog(&mut state.catalog);
                 tracing::info!(n = state.catalog.len(), "catalog size");
             }
             Err(err) => state
                 .doctor_warnings
                 .push(format!("terminus list JSON parse failed: {err:#}")),
         },
+        JobKind::DoctorLandoHelp => {
+            crate::catalog::ensure_lando_catalog(&mut state.catalog);
+            for entry in crate::catalog::parse_lando_help(stdout) {
+                if !state.catalog.iter().any(|e| e.name == entry.name) {
+                    state.catalog.push(entry);
+                }
+            }
+        }
         JobKind::DoctorVersion { tool } => {
             let ver = parse_version_line(stdout);
             if ver.is_empty() {
