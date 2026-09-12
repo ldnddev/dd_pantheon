@@ -403,6 +403,12 @@ pub struct FormFieldHit {
 }
 
 #[derive(Clone, Debug)]
+pub struct CompanionHit {
+    pub insert: String,
+    pub area: Rect,
+}
+
+#[derive(Clone, Debug)]
 pub struct FilterHit {
     pub site: String,
     pub env: Option<String>,
@@ -496,6 +502,7 @@ pub struct AppState {
     pub period_hits: Vec<PeriodHit>,
     pub preview_buttons: Vec<PreviewButtonHit>,
     pub form_field_hits: Vec<FormFieldHit>,
+    pub companion_hits: Vec<CompanionHit>,
     pub org_prompted: HashSet<String>,
     pub selected_chip: Option<String>,
     pub tag_chips: Vec<TagChipHit>,
@@ -584,6 +591,7 @@ impl AppState {
             period_hits: Vec::new(),
             preview_buttons: Vec::new(),
             form_field_hits: Vec::new(),
+            companion_hits: Vec::new(),
             org_prompted: HashSet::new(),
             selected_chip: None,
             tag_chips: Vec::new(),

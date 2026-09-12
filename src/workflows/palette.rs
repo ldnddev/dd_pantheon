@@ -1,4 +1,6 @@
-use crate::catalog::{CatalogEntry, demo_catalog, ensure_lando_catalog, is_lando_init, visible};
+use crate::catalog::{
+    CatalogEntry, command_key, demo_catalog, ensure_lando_catalog, is_lando_init, visible,
+};
 use crate::config::push_history;
 use crate::models::Framework;
 use crate::plan::{CommandPlan, PlanTarget, SafetyTier, StagedPlan, ToolKind, WorkflowPlan};
@@ -308,7 +310,7 @@ pub fn form_from_entry(state: &AppState, entry: &CatalogEntry) -> PaletteForm {
             continue;
         }
         if TOGGLE_OPTS.contains(&name.as_str()) {
-            let on = (entry.name == "env:clone-content" && name == "--cc")
+            let on = (command_key(&entry.name) == "env:clone-content" && name == "--cc")
                 || (name == "--updatedb" && is_drupal(state));
             toggles.push((name, on));
         }
@@ -332,6 +334,7 @@ fn normalize_opt(name: &str) -> String {
 }
 
 fn prefill_arg(state: &AppState, command: &str, arg: &str) -> String {
+    let command = command_key(command);
     match arg {
         "site_env" | "site_env_id" if command == "env:clone-content" => match &state.selected {
             TreeSel::Env { site, env } if env != "live" => format!("{site}.live"),
@@ -457,7 +460,7 @@ pub fn plan_from_catalog(
     name: &str,
     args: &PaletteArgs,
 ) -> Result<StagedPlan, CatalogError> {
-    match name {
+    match command_key(name) {
         "env:deploy" => route_deploy(state, args),
         "connection:set" => route_connection_set(state, args),
         "env:clone-content" => route_clone(state, args),
@@ -755,6 +758,7 @@ fn generic_plan(
     args: &PaletteArgs,
 ) -> Result<StagedPlan, CatalogError> {
     let lando = name.starts_with("lando ");
+    let key = command_key(name);
     let (tool, binary, mut argv) = if lando {
         let cmd = name.trim_start_matches("lando ").trim();
         if cmd.is_empty() {
@@ -769,7 +773,7 @@ fn generic_plan(
         (
             ToolKind::Terminus,
             state.tools.terminus_path(),
-            vec![name.to_string()],
+            vec![key.to_string()],
         )
     };
     for (key, val) in &args.values {
@@ -881,19 +885,19 @@ mod tests {
         let catalog = demo_catalog();
         let cache = filter_catalog(&catalog, "cache");
         assert!(
-            cache.iter().any(|e| e.name == "env:clear-cache"),
-            "cache should find env:clear-cache"
+            cache.iter().any(|e| e.name == "terminus env:clear-cache"),
+            "cache should find terminus env:clear-cache"
         );
         let wp = filter_catalog(&catalog, "wp");
-        assert!(wp.iter().any(|e| e.name == "remote:wp"));
+        assert!(wp.iter().any(|e| e.name == "terminus remote:wp"));
         let lando_pull = filter_catalog(&catalog, "lando pull");
         assert!(lando_pull.iter().any(|e| e.name == "lando pull"));
         let deploy = filter_catalog(&catalog, "terminus deploy");
-        assert!(deploy.iter().any(|e| e.name == "env:deploy"));
+        assert!(deploy.iter().any(|e| e.name == "terminus env:deploy"));
         let wipe = filter_catalog(&catalog, "wipe");
-        assert!(wipe.iter().any(|e| e.name == "env:wipe"));
+        assert!(wipe.iter().any(|e| e.name == "terminus env:wipe"));
         assert!(
-            !wipe.iter().any(|e| e.name == "remote:wp"),
+            !wipe.iter().any(|e| e.name == "terminus remote:wp"),
             "wipe must not subsequence-match WordPress descriptions"
         );
         let lando = filter_catalog(&catalog, "lando");
@@ -903,5 +907,14 @@ mod tests {
         );
         assert!(lando.iter().any(|e| e.name == "lando init"));
         assert!(lando.iter().any(|e| e.name == "lando start"));
+        let terminus = filter_catalog(&catalog, "terminus");
+        assert!(
+            terminus
+                .iter()
+                .filter(|e| e.tool == ToolKind::Terminus)
+                .all(|e| e.name.starts_with("terminus ")),
+            "terminus filter should list terminus-prefixed names"
+        );
+        assert!(terminus.iter().any(|e| e.name == "terminus env:deploy"));
     }
 }

@@ -1444,8 +1444,9 @@ pub fn handle_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
     if let Some(area) = state.modal_area {
         if contains(area, x, y) {
             if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
-                let hits = state.form_field_hits.clone();
-                if let Some(hit) = hits.iter().find(|h| contains(h.area, x, y)) {
+                let field_hits = state.form_field_hits.clone();
+                let companion_hits = state.companion_hits.clone();
+                if let Some(hit) = field_hits.iter().find(|h| contains(h.area, x, y)) {
                     match &mut state.modal {
                         Some(Modal::Palette {
                             form: Some(form), ..
@@ -1453,6 +1454,20 @@ pub fn handle_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
                             form.focus = hit.focus;
                         }
                         Some(Modal::Cms { form }) => {
+                            form.focus = CmsFocus::Command;
+                        }
+                        _ => {}
+                    }
+                } else if let Some(hit) = companion_hits.iter().find(|h| contains(h.area, x, y)) {
+                    match &mut state.modal {
+                        Some(Modal::Palette {
+                            form: Some(form), ..
+                        }) => {
+                            form.extra = hit.insert.clone();
+                            form.focus = form.field_count().saturating_sub(1);
+                        }
+                        Some(Modal::Cms { form }) => {
+                            form.command = hit.insert.clone();
                             form.focus = CmsFocus::Command;
                         }
                         _ => {}

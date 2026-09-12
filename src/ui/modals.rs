@@ -10,6 +10,7 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 pub fn draw_login(
     f: &mut Frame,
@@ -764,6 +765,7 @@ pub fn draw_palette(
         return;
     }
     state.form_field_hits.clear();
+    state.companion_hits.clear();
     let theme = &state.theme;
     let hits = crate::workflows::palette::matches_for(state, query);
     let mut lines = vec![
@@ -807,7 +809,7 @@ pub fn draw_palette(
                 ""
             };
             lines.push(Line::from(Span::styled(
-                format!("{marker}{:<22} {}{hint}", entry.name, entry.description),
+                format!("{marker}{:<32} {}{hint}", entry.name, entry.description),
                 style,
             )));
         }
@@ -831,6 +833,7 @@ pub fn draw_palette(
 fn draw_palette_form(f: &mut Frame, state: &mut AppState, area: Rect, form: &PaletteForm) {
     let theme = state.theme.clone();
     state.form_field_hits.clear();
+    state.companion_hits.clear();
     let filled = palette_filled(form);
     let function = if form.entry.description.trim().is_empty() {
         "Run this Terminus or Lando command through preview → confirm.".to_string()
@@ -871,13 +874,30 @@ fn draw_palette_form(f: &mut Frame, state: &mut AppState, area: Rect, form: &Pal
         catalog::arg_placeholder("extra"),
     ));
 
+    let companions = catalog::companions_for_entry(&form.entry);
     let header_h = 7.min(inner.height.saturating_sub(4));
+    let footer_h = 1;
+    let n_text = text_fields.len() as u16;
+    let n_tog = form.toggles.len() as u16;
+    let field_need = n_text.saturating_mul(3).saturating_add(n_tog).max(3);
+    let avail = inner
+        .height
+        .saturating_sub(header_h)
+        .saturating_sub(footer_h);
+    let min_comp = if companions.is_empty() { 0 } else { 6 };
+    let field_h = field_need.min(avail.saturating_sub(min_comp)).max(3);
+    let companion_h = if companions.is_empty() {
+        0
+    } else {
+        avail.saturating_sub(field_h)
+    };
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(header_h),
-            Constraint::Min(3),
-            Constraint::Length(1),
+            Constraint::Length(field_h),
+            Constraint::Length(companion_h),
+            Constraint::Length(footer_h),
         ])
         .split(inner);
 
@@ -959,13 +979,125 @@ fn draw_palette_form(f: &mut Frame, state: &mut AppState, area: Rect, form: &Pal
         );
     }
 
+    if companion_h >= 3 {
+        draw_companion_list(
+            f,
+            state,
+            &theme,
+            chunks[2],
+            &form.entry.name,
+            &companions,
+            &form.extra,
+        );
+    }
     f.render_widget(
         Paragraph::new(Span::styled(
-            "Tab fields and type.  Enter stages (does not run).  Esc back.",
+            "Tab fields and type.  Click a top option to insert.  Enter stages (does not run).  Esc back.",
             theme.secondary,
         )),
-        chunks[2],
+        chunks[3],
     );
+}
+
+fn draw_companion_list(
+    f: &mut Frame,
+    state: &mut AppState,
+    theme: &Theme,
+    area: Rect,
+    command: &str,
+    companions: &[catalog::Companion],
+    extra: &str,
+) {
+    if area.height == 0 {
+        return;
+    }
+    let title = format!("Top options for {command}");
+    let block = Block::default()
+        .title(Line::from(Span::styled(title, theme.modal_label)))
+        .borders(Borders::ALL)
+        .border_style(theme.border)
+        .style(theme.modal);
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    if inner.height == 0 {
+        return;
+    }
+    let width = inner.width.max(1) as usize;
+    let mut lines: Vec<Line> = Vec::new();
+    let mut row_y = inner.y;
+    let bottom = inner.y.saturating_add(inner.height);
+    for item in companions {
+        let selected = extra.trim() == item.insert;
+        let style = if selected {
+            theme.input_text_focus
+        } else {
+            theme.modal_text
+        };
+        let marker = if selected { "▸ " } else { "  " };
+        let example_lines = wrap_words(&format!("{marker}{}", item.example), width);
+        let hint_lines = wrap_words(&format!("    {}", item.hint), width);
+        let used = example_lines.len() + hint_lines.len();
+        if row_y.saturating_add(used as u16) > bottom {
+            break;
+        }
+        let start_y = row_y;
+        for (i, chunk) in example_lines.into_iter().enumerate() {
+            let line_style = if i == 0 { style } else { theme.modal_text };
+            lines.push(Line::from(Span::styled(chunk, line_style)));
+            row_y = row_y.saturating_add(1);
+        }
+        for chunk in hint_lines {
+            lines.push(Line::from(Span::styled(chunk, theme.secondary)));
+            row_y = row_y.saturating_add(1);
+        }
+        state.companion_hits.push(crate::state::CompanionHit {
+            insert: item.insert.clone(),
+            area: Rect {
+                x: inner.x,
+                y: start_y,
+                width: inner.width,
+                height: row_y.saturating_sub(start_y).max(1),
+            },
+        });
+    }
+    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
+}
+
+fn wrap_words(text: &str, width: usize) -> Vec<String> {
+    if width == 0 {
+        return vec![text.to_string()];
+    }
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    for word in text.split_inclusive(' ') {
+        let w = word.width();
+        if !current.is_empty() && current.width() + w > width {
+            lines.push(std::mem::take(&mut current));
+        }
+        if w > width {
+            if !current.is_empty() {
+                lines.push(std::mem::take(&mut current));
+            }
+            let mut chunk = String::new();
+            for ch in word.chars() {
+                let cw = ch.width().unwrap_or(1);
+                if !chunk.is_empty() && chunk.width() + cw > width {
+                    lines.push(std::mem::take(&mut chunk));
+                }
+                chunk.push(ch);
+            }
+            current = chunk;
+        } else {
+            current.push_str(word);
+        }
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines
 }
 
 fn draw_text_input(
@@ -1057,6 +1189,7 @@ fn palette_filled(form: &PaletteForm) -> Vec<(String, String)> {
 pub fn draw_cms(f: &mut Frame, state: &mut AppState, area: Rect, form: &CmsForm) {
     let theme = state.theme.clone();
     state.form_field_hits.clear();
+    state.companion_hits.clear();
     let mark = |focused: bool| if focused { ">" } else { " " };
     let style = |focused: bool| {
         if focused {
@@ -1082,11 +1215,29 @@ pub fn draw_cms(f: &mut Frame, state: &mut AppState, area: Rect, form: &CmsForm)
         .style(theme.modal);
     let inner = block.inner(area);
     f.render_widget(block, area);
+    let cms_name = match (form.target.label(), form.cms.label()) {
+        (t, "wp") if t == "local" => "lando wp",
+        (_, "wp") => "remote:wp",
+        (t, _) if t == "local" => "lando drush",
+        _ => "remote:drush",
+    };
+    let companions = catalog::companions_for(cms_name, &[]);
+    state.companion_hits.clear();
+    let companion_h = if companions.is_empty() {
+        0
+    } else {
+        (companions.len() as u16)
+            .saturating_add(2)
+            .min(10)
+            .min(inner.height.saturating_sub(13))
+            .max(0)
+    };
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(8),
             Constraint::Length(3),
+            Constraint::Length(companion_h),
             Constraint::Min(3),
             Constraint::Length(1),
         ])
@@ -1143,6 +1294,17 @@ pub fn draw_cms(f: &mut Frame, state: &mut AppState, area: Rect, form: &CmsForm)
         focus: 2,
         area: chunks[1],
     });
+    if companion_h >= 3 {
+        draw_companion_list(
+            f,
+            state,
+            &theme,
+            chunks[2],
+            cms_name,
+            &companions,
+            &form.command,
+        );
+    }
     let mut hist = vec![Line::from(Span::styled(
         "history (↑↓)",
         if form.focus == CmsFocus::History {
@@ -1162,14 +1324,36 @@ pub fn draw_cms(f: &mut Frame, state: &mut AppState, area: Rect, form: &CmsForm)
             theme.modal_text,
         )));
     }
-    f.render_widget(Paragraph::new(hist), chunks[2]);
+    f.render_widget(Paragraph::new(hist), chunks[3]);
     f.render_widget(
         Paragraph::new(Span::styled(
-            "Tab fields and type.  Enter run.  Esc cancel.",
+            "Tab fields and type.  Click a top option to insert.  Enter run.  Esc cancel.",
             theme.secondary,
         )),
-        chunks[3],
+        chunks[4],
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::wrap_words;
+
+    #[test]
+    fn wrap_words_breaks_long_examples() {
+        let lines = wrap_words(
+            "lando wp search-replace 'old-domain.com' 'new-domain.lndo.site'",
+            40,
+        );
+        assert!(lines.len() >= 2, "{lines:?}");
+        assert!(
+            lines
+                .iter()
+                .all(|l| l.chars().count() <= 40 || l.split_whitespace().count() == 1)
+        );
+        let joined = lines.join("");
+        assert!(joined.contains("search-replace"));
+        assert!(joined.contains("new-domain.lndo.site"));
+    }
 }
 
 fn field<'a>(theme: &'a Theme, focused: bool, key: &str, value: &str) -> Line<'a> {

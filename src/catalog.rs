@@ -147,7 +147,7 @@ pub fn parse_terminus_list(json: &str) -> anyhow::Result<Vec<CatalogEntry>> {
         out.push(CatalogEntry {
             tool: ToolKind::Terminus,
             safety_hint: hint_from_name(&cmd.name),
-            name: cmd.name,
+            name: terminus_catalog_name(&cmd.name),
             description: cmd.description,
             kind,
             arguments,
@@ -375,6 +375,313 @@ pub fn is_lando_init(name: &str) -> bool {
     name.eq_ignore_ascii_case("lando init")
 }
 
+pub fn terminus_catalog_name(cmd: &str) -> String {
+    if cmd.starts_with("terminus ") {
+        cmd.to_string()
+    } else {
+        format!("terminus {cmd}")
+    }
+}
+
+/// Bare command used for routing/argv. `terminus env:deploy` → `env:deploy`.
+/// Lando names stay `lando pull`.
+pub fn command_key(name: &str) -> &str {
+    name.strip_prefix("terminus ").unwrap_or(name)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Companion {
+    /// Argv dropped into the extra / command field (no binary prefix).
+    pub insert: String,
+    /// Full example shown in the list, e.g. `lando wp plugin list`.
+    pub example: String,
+    pub hint: String,
+}
+
+fn companion_row(prefix: &str, extra: &str, hint: &str) -> Companion {
+    let example = if extra.is_empty() {
+        prefix.to_string()
+    } else {
+        format!("{prefix} {extra}")
+    };
+    Companion {
+        insert: extra.to_string(),
+        example,
+        hint: hint.to_string(),
+    }
+}
+
+fn companion_rows(prefix: &str, items: &[(&str, &str)]) -> Vec<Companion> {
+    items
+        .iter()
+        .map(|(extra, hint)| companion_row(prefix, extra, hint))
+        .collect()
+}
+
+fn example_prefix(name: &str) -> String {
+    match name {
+        n if n.starts_with("lando ") => n.to_string(),
+        "remote:wp" => "terminus remote:wp acme-wp.live --".into(),
+        "remote:drush" => "terminus remote:drush acme-wp.live --".into(),
+        "env:deploy" => "terminus env:deploy acme-wp.test".into(),
+        "env:clone-content" => "terminus env:clone-content acme-wp.live dev".into(),
+        "backup:create" => "terminus backup:create acme-wp.test".into(),
+        "backup:restore" => "terminus backup:restore acme-wp.dev".into(),
+        "env:metrics" => "terminus env:metrics acme-wp.live".into(),
+        "connection:set" => "terminus connection:set acme-wp.dev".into(),
+        n => format!("terminus {n}"),
+    }
+}
+
+/// Frequent follow-on argv for the selected command (shown under the form).
+pub fn companions_for_entry(entry: &CatalogEntry) -> Vec<Companion> {
+    companions_for(&entry.name, &entry.options)
+}
+
+pub fn companions_for(name: &str, options: &[CatalogOpt]) -> Vec<Companion> {
+    let key = command_key(name).to_ascii_lowercase();
+    let curated = match key.as_str() {
+        "lando wp" => companion_rows(
+            "lando wp",
+            &[
+                ("plugin list", "List installed plugins"),
+                (
+                    "plugin install akismet --activate",
+                    "Install and activate a plugin",
+                ),
+                ("plugin update --all", "Update all plugins"),
+                ("theme list", "List installed themes"),
+                ("cache flush", "Flush object cache"),
+                ("rewrite flush", "Flush permalinks"),
+                ("option get siteurl", "Print the site URL"),
+                ("user list --role=administrator", "List administrators"),
+                (
+                    "search-replace 'old-domain.com' 'new-domain.lndo.site'",
+                    "Replace URLs after a domain change",
+                ),
+                ("db export backup.sql", "Export the database to a file"),
+                ("core version", "Print WordPress version"),
+            ],
+        ),
+        "remote:wp" => companion_rows(
+            "terminus remote:wp acme-wp.live --",
+            &[
+                ("plugin list", "List installed plugins"),
+                (
+                    "plugin install akismet --activate",
+                    "Install and activate a plugin",
+                ),
+                ("plugin update --all", "Update all plugins"),
+                ("theme list", "List installed themes"),
+                ("cache flush", "Flush object cache"),
+                ("rewrite flush", "Flush permalinks"),
+                ("option get siteurl", "Print the site URL"),
+                ("user list --role=administrator", "List administrators"),
+                (
+                    "search-replace 'old-domain.com' 'www.example.com'",
+                    "Replace URLs after a domain change",
+                ),
+                ("db export", "Export the database"),
+                ("core version", "Print WordPress version"),
+            ],
+        ),
+        "lando drush" => companion_rows(
+            "lando drush",
+            &[
+                ("status", "Drupal bootstrap status"),
+                ("cr", "Rebuild caches"),
+                ("cim -y", "Import configuration"),
+                ("cex -y", "Export configuration"),
+                ("updb -y", "Run database updates"),
+                ("uli", "One-time admin login URL"),
+                ("sql:dump --result-file=dump.sql", "Dump the database"),
+                ("watchdog:show --count=20", "Recent log messages"),
+                ("pm:list --status=enabled", "List enabled modules"),
+            ],
+        ),
+        "remote:drush" => companion_rows(
+            "terminus remote:drush acme-wp.live --",
+            &[
+                ("status", "Drupal bootstrap status"),
+                ("cr", "Rebuild caches"),
+                ("cim -y", "Import configuration"),
+                ("cex -y", "Export configuration"),
+                ("updb -y", "Run database updates"),
+                ("uli", "One-time admin login URL"),
+                ("sql:dump", "Dump the database"),
+                ("watchdog:show --count=20", "Recent log messages"),
+                ("pm:list --status=enabled", "List enabled modules"),
+            ],
+        ),
+        "lando pull" => companion_rows(
+            "lando pull",
+            &[
+                (
+                    "--code=live --database=live --files=live",
+                    "Pull code, db, and files from live",
+                ),
+                (
+                    "--code=live --database=none --files=none",
+                    "Code only from live",
+                ),
+                (
+                    "--code=none --database=live --files=none",
+                    "Database only from live",
+                ),
+                (
+                    "--code=none --database=none --files=live",
+                    "Files only from live",
+                ),
+                (
+                    "--code=test --database=test --files=test",
+                    "Pull everything from test",
+                ),
+            ],
+        ),
+        "lando push" => companion_rows(
+            "lando push",
+            &[
+                (
+                    "--code --database=none --files=none",
+                    "Push code only (safe default)",
+                ),
+                (
+                    "--database --code=none --files=none",
+                    "Push database (LiveGate on live)",
+                ),
+                ("--files --code=none --database=none", "Push files only"),
+            ],
+        ),
+        "lando composer" => companion_rows(
+            "lando composer",
+            &[
+                ("install --no-dev", "Install PHP dependencies"),
+                ("update --with-dependencies", "Update PHP dependencies"),
+                ("require drupal/token:^2", "Add a Composer package"),
+                ("dump-autoload -o", "Rebuild the autoloader"),
+            ],
+        ),
+        "lando exec" => companion_rows(
+            "lando exec",
+            &[
+                ("appserver -- php -v", "PHP version on appserver"),
+                ("database -- mysql -e 'SHOW DATABASES'", "List databases"),
+            ],
+        ),
+        "lando mysql" => companion_rows(
+            "lando mysql",
+            &[
+                ("-e 'SHOW TABLES'", "List tables"),
+                ("-e 'SELECT DATABASE()'", "Show the current database"),
+            ],
+        ),
+        "lando terminus" => companion_rows(
+            "lando terminus",
+            &[
+                ("site:list", "List Pantheon sites"),
+                ("env:info acme-wp.live", "Environment info"),
+                ("auth:whoami", "Current Terminus user"),
+            ],
+        ),
+        "env:deploy" => companion_rows(
+            "terminus env:deploy acme-wp.test",
+            &[
+                ("--cc", "Clear cache after deploy"),
+                ("--updatedb", "Drupal updatedb after deploy"),
+                (
+                    "--cc --updatedb --note=\"release\"",
+                    "Typical Drupal deploy",
+                ),
+            ],
+        ),
+        "env:clone-content" => companion_rows(
+            "terminus env:clone-content acme-wp.live dev",
+            &[
+                ("--cc --updatedb", "Clone then cache-rebuild and updatedb"),
+                ("--db-only", "Database only"),
+                ("--files-only", "Files only"),
+            ],
+        ),
+        "backup:create" => companion_rows(
+            "terminus backup:create acme-wp.test",
+            &[
+                ("--element=all", "Code, database, and files"),
+                ("--element=database", "Database only"),
+                ("--element=files", "Files only"),
+                ("--element=code", "Code only"),
+            ],
+        ),
+        "backup:restore" => companion_rows(
+            "terminus backup:restore acme-wp.dev",
+            &[
+                ("--element=all", "Code, database, and files"),
+                ("--element=database", "Database only"),
+                ("--element=files", "Files only"),
+                ("--element=code", "Code only"),
+            ],
+        ),
+        "env:metrics" => companion_rows(
+            "terminus env:metrics acme-wp.live",
+            &[
+                ("--period=day", "Last day"),
+                ("--period=week", "Last week"),
+                ("--period=month", "Last month"),
+            ],
+        ),
+        "connection:set" => companion_rows(
+            "terminus connection:set acme-wp.dev",
+            &[
+                ("git", "Git connection mode"),
+                ("sftp", "SFTP connection mode"),
+            ],
+        ),
+        "lando start" => companion_rows("lando start", &[("", "Start the local app")]),
+        "lando stop" => companion_rows("lando stop", &[("", "Stop the local app")]),
+        "lando restart" => companion_rows("lando restart", &[("", "Restart the local app")]),
+        "lando rebuild" => companion_rows(
+            "lando rebuild",
+            &[("-y", "Rebuild from scratch (TUI still confirms)")],
+        ),
+        "lando init" => companion_rows(
+            "lando init",
+            &[
+                (
+                    "--source pantheon --pantheon-site acme-wp --pantheon-site-env dev",
+                    "Init a Landofile from a Pantheon site",
+                ),
+                ("--recipe pantheon", "Pantheon recipe only"),
+            ],
+        ),
+        _ => Vec::new(),
+    };
+    if !curated.is_empty() {
+        return curated;
+    }
+    let prefix = example_prefix(&key);
+    options
+        .iter()
+        .take(8)
+        .map(|opt| {
+            let flag = if opt.name.starts_with('-') {
+                opt.name.clone()
+            } else {
+                format!("--{}", opt.name)
+            };
+            let extra = if opt.accept_value {
+                format!("{flag}=<value>")
+            } else {
+                flag.clone()
+            };
+            let hint = if opt.description.trim().is_empty() {
+                flag
+            } else {
+                opt.description.clone()
+            };
+            companion_row(&prefix, &extra, &hint)
+        })
+        .collect()
+}
+
 pub fn invocation_prefix(entry: &CatalogEntry) -> String {
     match entry.tool {
         ToolKind::Lando => {
@@ -384,7 +691,13 @@ pub fn invocation_prefix(entry: &CatalogEntry) -> String {
                 format!("lando {}", entry.name)
             }
         }
-        ToolKind::Terminus => format!("terminus {}", entry.name),
+        ToolKind::Terminus => {
+            if entry.name.starts_with("terminus ") {
+                entry.name.clone()
+            } else {
+                format!("terminus {}", entry.name)
+            }
+        }
         ToolKind::Git => format!("git {}", entry.name),
     }
 }
@@ -561,7 +874,7 @@ fn fallback_arg_help(name: &str) -> &'static str {
 }
 
 fn curated_example(entry: &CatalogEntry) -> Option<&'static str> {
-    Some(match entry.name.as_str() {
+    Some(match command_key(&entry.name) {
         "tag:add" => "terminus tag:add acme-wp my-org production",
         "tag:remove" | "tag:rm" => "terminus tag:remove acme-wp my-org production",
         "tag:list" => "terminus tag:list acme-wp my-org",
@@ -587,7 +900,7 @@ fn curated_example(entry: &CatalogEntry) -> Option<&'static str> {
 }
 
 fn curated_extra(entry: &CatalogEntry) -> Option<&'static str> {
-    match entry.name.as_str() {
+    match command_key(&entry.name) {
         "lando pull" => Some("--code=live --database=live --files=live"),
         "lando push" => Some("--code --database=none --files=none"),
         "remote:wp" => Some("-- plugin list"),
@@ -693,7 +1006,7 @@ fn terminus(
         tool: ToolKind::Terminus,
         safety_hint: hint_from_name(name),
         kind: kind_for(name, false),
-        name: name.into(),
+        name: terminus_catalog_name(name),
         description: description.into(),
         arguments,
         options: option_names
@@ -767,7 +1080,10 @@ mod tests {
     fn terminus_list_keeps_args_and_drops_yes_help() {
         let entries = parse_terminus_list(SAMPLE).expect("parse");
         assert_eq!(entries.len(), 3);
-        let metrics = entries.iter().find(|e| e.name == "env:metrics").unwrap();
+        let metrics = entries
+            .iter()
+            .find(|e| e.name == "terminus env:metrics")
+            .unwrap();
         assert_eq!(metrics.kind, CatalogKind::Workflow);
         assert_eq!(metrics.arguments.len(), 1);
         assert_eq!(metrics.arguments[0].name, "site_env");
@@ -781,9 +1097,12 @@ mod tests {
         );
         assert_eq!(metrics.safety_hint, SafetyTier::ReadOnly);
 
-        let art = entries.iter().find(|e| e.name == "art").unwrap();
+        let art = entries.iter().find(|e| e.name == "terminus art").unwrap();
         assert_eq!(art.kind, CatalogKind::Hidden);
-        let complete = entries.iter().find(|e| e.name == "_complete").unwrap();
+        let complete = entries
+            .iter()
+            .find(|e| e.name == "terminus _complete")
+            .unwrap();
         assert_eq!(complete.kind, CatalogKind::Hidden);
     }
 
@@ -815,6 +1134,13 @@ Commands:
             seeded
                 .iter()
                 .all(|e| e.tool == ToolKind::Lando && e.name.starts_with("lando "))
+        );
+        let demo = demo_catalog();
+        assert!(
+            demo.iter()
+                .filter(|e| e.tool == ToolKind::Terminus)
+                .all(|e| e.name.starts_with("terminus ")),
+            "demo terminus names should start with terminus"
         );
         let mut catalog = vec![];
         ensure_lando_catalog(&mut catalog);
@@ -860,6 +1186,42 @@ Commands:
     }
 
     #[test]
+    fn companions_for_wp_and_fallback_options() {
+        let wp = companions_for("lando wp", &[]);
+        let sr = wp
+            .iter()
+            .find(|c| c.insert.contains("search-replace"))
+            .expect("search-replace example");
+        assert_eq!(
+            sr.example,
+            "lando wp search-replace 'old-domain.com' 'new-domain.lndo.site'"
+        );
+        assert!(wp.iter().any(|c| c.example == "lando wp plugin list"));
+        assert!(wp.iter().any(|c| c.insert == "cache flush"));
+        let remote = companions_for("remote:wp", &[]);
+        assert!(remote.iter().any(|c| {
+            c.example
+                .starts_with("terminus remote:wp acme-wp.live -- plugin list")
+        }));
+        let pull = companions_for("lando pull", &[]);
+        assert!(
+            pull.iter()
+                .any(|c| c.example == "lando pull --code=live --database=live --files=live")
+        );
+        let opts = vec![CatalogOpt {
+            name: "--period".into(),
+            shortcut: None,
+            accept_value: true,
+            description: "day|week|month".into(),
+        }];
+        let metrics = companions_for("env:metrics", &opts);
+        assert!(metrics.iter().any(|c| c.example.contains("period=day")));
+        let unknown = companions_for("secret:set", &opts);
+        assert_eq!(unknown[0].insert, "--period=<value>");
+        assert_eq!(unknown[0].example, "terminus secret:set --period=<value>");
+    }
+
+    #[test]
     fn live_terminus_list_parses_when_present() {
         let tools = crate::tools::detect_tools();
         let Some(term) = tools.terminus else {
@@ -874,7 +1236,10 @@ Commands:
             "expected a full terminus catalog, got {}",
             entries.len()
         );
-        let metrics = entries.iter().find(|e| e.name == "env:metrics").unwrap();
+        let metrics = entries
+            .iter()
+            .find(|e| e.name == "terminus env:metrics")
+            .unwrap();
         assert!(metrics.arguments.iter().any(|a| a.name == "site_env"));
         assert!(metrics.options.iter().any(|o| o.name == "--period"));
         assert!(!metrics.options.iter().any(|o| o.name == "--yes"));

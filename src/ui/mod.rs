@@ -63,6 +63,7 @@ fn draw_modal(f: &mut Frame, state: &mut AppState, area: Rect) {
     let modal_area = match &state.modal {
         Some(Modal::Filter { .. }) => centered_rect(58, 62, area),
         Some(Modal::Palette { form: None, .. }) => centered_rect(78, 74, area),
+        Some(Modal::Palette { form: Some(_), .. }) => centered_rect(84, 86, area),
         _ => centered_rect(72, 70, area),
     };
     state.modal_area = Some(modal_area);
