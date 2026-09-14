@@ -121,6 +121,40 @@ fn ctrl_q_quits_and_bare_q_does_not() {
 }
 
 #[test]
+fn enter_on_log_opens_expand_modal() {
+    let (mut app, root) = demo_app();
+    app.state.focus = FocusPane::Log;
+    app.handle_key(key(KeyCode::Enter)).unwrap();
+    assert!(matches!(app.state.modal, Some(Modal::LogExpand)));
+    app.handle_key(key(KeyCode::Esc)).unwrap();
+    assert!(app.state.modal.is_none());
+
+    app.state.focus = FocusPane::Log;
+    app.handle_key(key(KeyCode::Char('e'))).unwrap();
+    assert!(matches!(app.state.modal, Some(Modal::LogExpand)));
+    app.handle_key(key(KeyCode::Enter)).unwrap();
+    assert!(app.state.modal.is_none());
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn log_expand_scrolls_shared_offset() {
+    let (mut app, root) = demo_app();
+    app.state.focus = FocusPane::Log;
+    app.state.log_lines = (0..40).map(|i| format!("line {i}")).collect();
+    app.handle_key(key(KeyCode::Char('j'))).unwrap();
+    app.handle_key(key(KeyCode::Char('j'))).unwrap();
+    assert_eq!(app.state.log_scroll, 2);
+    app.handle_key(key(KeyCode::Enter)).unwrap();
+    assert!(matches!(app.state.modal, Some(Modal::LogExpand)));
+    app.handle_key(key(KeyCode::Char('j'))).unwrap();
+    assert_eq!(app.state.log_scroll, 3);
+    app.handle_key(key(KeyCode::Char('g'))).unwrap();
+    assert_eq!(app.state.log_scroll, 0);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn slash_opens_filter_from_any_pane() {
     let (mut app, root) = demo_app();
     app.state.focus = FocusPane::Log;

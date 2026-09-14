@@ -21,15 +21,16 @@ pub fn split(layout: LayoutId, body: Rect, state: &AppState) -> PaneRects {
     }
 }
 
+fn classic_log_height(body_h: u16) -> u16 {
+    // Keep inspector + preview usable; give the docked log a real reading strip.
+    let budget = body_h.saturating_sub(16);
+    (body_h / 3).clamp(6, 16).min(budget).max(4)
+}
+
 fn split_a(body: Rect) -> PaneRects {
     // Sites tree on the left spanning inspector + command preview;
     // job log is full width underneath.
-    let log_h = body
-        .height
-        .saturating_sub(18)
-        .min(8)
-        .max(4)
-        .min(body.height.saturating_sub(12));
+    let log_h = classic_log_height(body.height).min(body.height.saturating_sub(12));
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(12), Constraint::Length(log_h)])
@@ -81,7 +82,7 @@ fn split_c(body: Rect, state: &AppState) -> PaneRects {
     let log_h = if state.log_collapsed() {
         1
     } else {
-        6.min(body.height.saturating_sub(10)).max(3)
+        8.min(body.height.saturating_sub(10)).max(3)
     };
     let rows = Layout::default()
         .direction(Direction::Vertical)
@@ -163,7 +164,7 @@ mod tests {
         let state = demo_state();
         let panes = split(LayoutId::ClassicStack, Rect::new(0, 0, 120, 40), &state);
         assert!(panes.preview.height >= 5);
-        assert!(panes.log.height >= 3);
+        assert!(panes.log.height >= 10);
         assert!(panes.tree.width >= 24);
     }
 

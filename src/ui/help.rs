@@ -88,9 +88,16 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect, scroll: u16) {
     lines.push(line("c", "no-op in preview (not copy, not clear-cache)"));
     lines.push(line("j/k", "Scroll"));
     lines.push(line(
+        "Enter / e",
+        "Expand job log to a full-size modal (Esc closes)",
+    ));
+    lines.push(line("g / G", "Log top / bottom"));
+    lines.push(line("PgUp / PgDn", "Log page"));
+    lines.push(line(
         "click",
         "Process / Copy / Cancel buttons in command preview",
     ));
+    lines.push(line("click log", "Focus; click again to expand"));
 
     push_header(&mut lines, state, "Mouse");
     lines.push(line(

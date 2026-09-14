@@ -170,6 +170,8 @@ pub enum Modal {
     Error {
         msg: String,
     },
+    /// Full-size overlay of the job log; shares `log_scroll` with the docked pane.
+    LogExpand,
     QuitConfirm,
 }
 

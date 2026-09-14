@@ -64,6 +64,7 @@ fn draw_modal(f: &mut Frame, state: &mut AppState, area: Rect) {
         Some(Modal::Filter { .. }) => centered_rect(58, 62, area),
         Some(Modal::Palette { form: None, .. }) => centered_rect(78, 74, area),
         Some(Modal::Palette { form: Some(_), .. }) => centered_rect(84, 86, area),
+        Some(Modal::LogExpand) => centered_rect(96, 92, area),
         _ => centered_rect(72, 70, area),
     };
     state.modal_area = Some(modal_area);
@@ -269,6 +270,7 @@ fn draw_modal(f: &mut Frame, state: &mut AppState, area: Rect) {
                 );
             f.render_widget(p, modal_area);
         }
+        Some(Modal::LogExpand) => log::draw_expanded(f, state, modal_area),
         None => {}
     }
 }

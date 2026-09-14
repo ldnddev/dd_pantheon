@@ -976,6 +976,21 @@ fn handle_modal(state: &mut AppState, key: KeyEvent, modal: Modal) -> Result<boo
                 state.modal = None;
             }
         }
+        Modal::LogExpand => match key.code {
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Enter => {
+                state.modal = None;
+            }
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                crate::workflows::cancel_jobs(state);
+            }
+            KeyCode::Char('j') | KeyCode::Down => scroll_log(state, 1),
+            KeyCode::Char('k') | KeyCode::Up => scroll_log(state, -1),
+            KeyCode::PageDown => scroll_log(state, log_page_size(state) as i32),
+            KeyCode::PageUp => scroll_log(state, -(log_page_size(state) as i32)),
+            KeyCode::Char('g') => state.log_scroll = 0,
+            KeyCode::Char('G') => jump_log_bottom(state),
+            _ => {}
+        },
         Modal::QuitConfirm => match key.code {
             KeyCode::Esc => state.modal = None,
             KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => {
@@ -1389,15 +1404,44 @@ fn handle_preview(state: &mut AppState, key: KeyEvent) -> Result<bool> {
 
 fn handle_log(state: &mut AppState, key: KeyEvent) -> Result<bool> {
     match key.code {
-        KeyCode::Char('j') | KeyCode::Down => {
-            state.log_scroll = state.log_scroll.saturating_add(1);
-        }
-        KeyCode::Char('k') | KeyCode::Up => {
-            state.log_scroll = state.log_scroll.saturating_sub(1);
-        }
+        KeyCode::Enter | KeyCode::Char('e') => open_log_expand(state),
+        KeyCode::Char('j') | KeyCode::Down => scroll_log(state, 1),
+        KeyCode::Char('k') | KeyCode::Up => scroll_log(state, -1),
+        KeyCode::PageDown => scroll_log(state, log_page_size(state) as i32),
+        KeyCode::PageUp => scroll_log(state, -(log_page_size(state) as i32)),
+        KeyCode::Char('g') => state.log_scroll = 0,
+        KeyCode::Char('G') => jump_log_bottom(state),
         _ => {}
     }
     Ok(false)
+}
+
+fn open_log_expand(state: &mut AppState) {
+    state.focus = FocusPane::Log;
+    state.modal = Some(Modal::LogExpand);
+}
+
+fn scroll_log(state: &mut AppState, delta: i32) {
+    if delta >= 0 {
+        let max = state.log_lines.len().saturating_sub(1) as u16;
+        state.log_scroll = state.log_scroll.saturating_add(delta as u16).min(max);
+    } else {
+        state.log_scroll = state.log_scroll.saturating_sub(delta.unsigned_abs() as u16);
+    }
+}
+
+fn jump_log_bottom(state: &mut AppState) {
+    let visible = log_page_size(state);
+    state.log_scroll = (state.log_lines.len() as u16).saturating_sub(visible);
+}
+
+fn log_page_size(state: &AppState) -> u16 {
+    let h = if matches!(state.modal, Some(Modal::LogExpand)) {
+        state.modal_area.map(|r| r.height).unwrap_or(24)
+    } else {
+        state.log_area.height
+    };
+    h.saturating_sub(3).max(1)
 }
 
 fn apply_metrics_period_key(state: &mut AppState, key: KeyEvent) -> bool {
@@ -1476,17 +1520,21 @@ pub fn handle_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
             }
             if let MouseEventKind::ScrollDown | MouseEventKind::ScrollUp = mouse.kind {
                 let down = matches!(mouse.kind, MouseEventKind::ScrollDown);
-                match &mut state.modal {
-                    Some(Modal::Help { scroll })
-                    | Some(Modal::Theme { scroll })
-                    | Some(Modal::Doctor { scroll }) => {
-                        if down {
-                            *scroll = scroll.saturating_add(1);
-                        } else {
-                            *scroll = scroll.saturating_sub(1);
+                if matches!(state.modal, Some(Modal::LogExpand)) {
+                    scroll_log(state, if down { 1 } else { -1 });
+                } else {
+                    match &mut state.modal {
+                        Some(Modal::Help { scroll })
+                        | Some(Modal::Theme { scroll })
+                        | Some(Modal::Doctor { scroll }) => {
+                            if down {
+                                *scroll = scroll.saturating_add(1);
+                            } else {
+                                *scroll = scroll.saturating_sub(1);
+                            }
                         }
+                        _ => {}
                     }
-                    _ => {}
                 }
             }
             return Ok(false);
@@ -1529,7 +1577,11 @@ pub fn handle_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
                     }
                 }
             } else if contains(state.log_area, x, y) {
-                state.focus = FocusPane::Log;
+                if state.focus == FocusPane::Log {
+                    open_log_expand(state);
+                } else {
+                    state.focus = FocusPane::Log;
+                }
             }
         }
         MouseEventKind::ScrollDown | MouseEventKind::ScrollUp => {
