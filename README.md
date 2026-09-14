@@ -2,13 +2,30 @@
 
 A guided operations cockpit for Pantheon-hosted WordPress and Drupal sites. It never talks to the Pantheon HTTP API. Every remote or local action is a `terminus`, `lando`, or `git` subprocess, shown as a `CommandPlan` before anything is spawned.
 
-Install the binary onto your PATH (default `~/.local/bin`):
+Install the binary onto your PATH (default `~/.local/bin`). A curl one-liner
+downloads the GitHub Release tarball for this OS/arch (Linux/macOS, x86_64 or
+arm64). No Rust toolchain required:
 
 ```sh
-./install.sh                 # release build → ~/.local/bin/dd_pantheon
+curl -fsSL https://raw.githubusercontent.com/ldnddev/dd_pantheon/main/install.sh | bash
 dd_pantheon --demo
 dd_pantheon
 dd_pantheon --root ~/sites/acme-wp
+```
+
+Pin a version with `VERSION=v0.2.2`. Uninstall:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ldnddev/dd_pantheon/main/install.sh | bash -s -- uninstall
+```
+
+From a clone, `./install.sh` builds with cargo when it is on `PATH`, otherwise
+it uses the same GitHub package as curl:
+
+```sh
+./install.sh                 # cargo release build, or GitHub package
+./install.sh --from-release  # always the GitHub package for this machine
+./install.sh --from-source   # always cargo
 ./install.sh uninstall       # removes the binary + default theme, not app config
 ```
 

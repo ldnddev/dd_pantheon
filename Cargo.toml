@@ -1,6 +1,6 @@
 [package]
 name = "dd_pantheon"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 license = "MIT"
 description = "Guided operations cockpit for Pantheon sites (Terminus + Lando)"
