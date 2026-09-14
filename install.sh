@@ -325,20 +325,21 @@ install_from_release() {
 
   local asset="dd_pantheon-${tag}-${TARGET}.tar.gz"
   local url="https://github.com/${REPO}/releases/download/${tag}/${asset}"
-  local work
-  work="$(mktemp -d)"
-  trap 'rm -rf "$work"' EXIT
+  # Global so the EXIT trap still sees the path after this function returns
+  # (curl | bash + set -u otherwise errors: work: unbound variable).
+  INSTALL_WORKDIR="$(mktemp -d)"
+  trap 'rm -rf "$INSTALL_WORKDIR"' EXIT
 
   info "downloading ${url}"
-  if ! http_get "$url" "$work/$asset"; then
+  if ! http_get "$url" "$INSTALL_WORKDIR/$asset"; then
     fail "no package ${asset} in ${tag}. Supported targets: x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, x86_64-apple-darwin, aarch64-apple-darwin"
   fi
 
-  local sumfile="$work/${asset}.sha256"
+  local sumfile="$INSTALL_WORKDIR/${asset}.sha256"
   if http_get "${url}.sha256" "$sumfile" 2>/dev/null; then
     local expect got
     expect="$(awk '{print $1}' "$sumfile" | head -n1)"
-    got="$(sha256_of "$work/$asset")"
+    got="$(sha256_of "$INSTALL_WORKDIR/$asset")"
     [ -n "$expect" ] || fail "checksum file for ${asset} was empty"
     if [ "$expect" != "$got" ]; then
       fail "SHA-256 mismatch for ${asset} (expected ${expect}, got ${got})"
@@ -348,12 +349,12 @@ install_from_release() {
     info "no ${asset}.sha256 attached to the release — skipping verify"
   fi
 
-  gzip -t "$work/$asset" 2>/dev/null || fail "download was not a gzip archive (wrong asset or HTML error page)"
-  tar -xzf "$work/$asset" -C "$work"
+  gzip -t "$INSTALL_WORKDIR/$asset" 2>/dev/null || fail "download was not a gzip archive (wrong asset or HTML error page)"
+  tar -xzf "$INSTALL_WORKDIR/$asset" -C "$INSTALL_WORKDIR"
 
   local bin theme
-  bin="$(find_in_tree "$work" "$APP_NAME")"
-  theme="$(find_in_tree "$work" "$THEME_FILE_NAME")"
+  bin="$(find_in_tree "$INSTALL_WORKDIR" "$APP_NAME")"
+  theme="$(find_in_tree "$INSTALL_WORKDIR" "$THEME_FILE_NAME")"
   [ -n "$bin" ] || fail "tarball did not contain ${APP_NAME}"
 
   install_binary "$bin"
