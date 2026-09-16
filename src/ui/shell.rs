@@ -11,22 +11,31 @@ pub fn draw_header(f: &mut Frame, state: &AppState, area: Rect) {
     if state.demo && area.width >= 40 {
         title.push_str("  DEMO");
     }
-    let mut block = Block::default()
+    let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
         .border_style(state.theme.active_border)
         .style(state.theme.app_shell);
-    if let Some(frame) = loader::current(state) {
-        block = block.title(
-            Line::from(Span::styled(
-                format!(" {frame} "),
-                state.theme.warning_style,
-            ))
-            .right_aligned(),
-        );
-    }
+    let inner = block.inner(area);
     let header = Paragraph::new(state.header_copy.as_str()).block(block);
     f.render_widget(header, area);
+    if let Some(frame) = loader::current(state) {
+        let label = format!(" {frame} ");
+        let w = label.width() as u16;
+        if inner.width >= w && inner.height > 0 {
+            let rect = Rect::new(
+                inner.x + inner.width.saturating_sub(w),
+                inner.y + inner.height.saturating_sub(1) / 2,
+                w,
+                1,
+            );
+            f.render_widget(
+                Paragraph::new(Span::styled(label, state.theme.warning_style))
+                    .style(state.theme.app_shell),
+                rect,
+            );
+        }
+    }
 }
 
 pub fn draw_footer(f: &mut Frame, state: &AppState, area: Rect) {
