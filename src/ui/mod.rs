@@ -1,7 +1,7 @@
-mod actions;
 mod help;
 mod inspector;
 mod layouts;
+pub(crate) mod loader;
 mod log;
 mod metrics;
 mod modals;
@@ -33,7 +33,7 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
         .split(f.area());
 
     shell::draw_header(f, state, outer[0]);
-    let panes = layouts::split(state.layout, outer[1], state);
+    let panes = layouts::split(outer[1], state);
     state.tree_area = panes.tree;
     state.inspector_area = panes.inspector;
     state.preview_area = panes.preview;

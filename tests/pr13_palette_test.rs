@@ -60,16 +60,15 @@ fn plan_from_catalog_lando_rebuild_is_destructive() {
 }
 
 #[test]
-fn plan_from_catalog_env_wipe_keeps_backup_first() {
+fn plan_from_catalog_env_wipe_is_the_selected_command() {
     let (app, root) = demo_app();
     match plan_from_catalog(&app.state, "env:wipe", &PaletteArgs::default()) {
-        Ok(StagedPlan::Workflow { plan, .. }) => {
-            assert_eq!(plan.steps[0].argv[0], "backup:create");
-            assert_eq!(plan.steps.last().unwrap().argv[0], "env:wipe");
+        Ok(StagedPlan::One(plan)) => {
+            assert_eq!(plan.argv[0], "env:wipe");
+            assert!(!plan.argv.iter().any(|a| a.contains("backup")));
             assert_eq!(plan.safety, SafetyTier::Destructive);
-            assert_eq!(plan.steps.last().unwrap().argv[1], "acme-wp.test");
         }
-        other => panic!("expected wipe workflow, got {other:?}"),
+        other => panic!("expected wipe plan, got {other:?}"),
     }
     let _ = fs::remove_dir_all(root);
 }
@@ -82,28 +81,39 @@ fn plan_from_catalog_env_wipe_live_is_livegate() {
         env: "live".into(),
     };
     match plan_from_catalog(&app.state, "env:wipe", &PaletteArgs::default()) {
-        Ok(StagedPlan::Workflow { plan, .. }) => {
-            assert_eq!(plan.steps[0].argv[0], "backup:create");
+        Ok(StagedPlan::One(plan)) => {
+            assert_eq!(plan.argv[0], "env:wipe");
+            assert!(!plan.argv.iter().any(|a| a.contains("backup")));
             assert_eq!(plan.safety, SafetyTier::LiveGate);
-            assert_eq!(plan.steps.last().unwrap().safety, SafetyTier::LiveGate);
         }
-        other => panic!("expected live wipe workflow, got {other:?}"),
+        other => panic!("expected live wipe plan, got {other:?}"),
     }
     let _ = fs::remove_dir_all(root);
 }
 
 #[test]
-fn plan_from_catalog_env_deploy_keeps_test_guards() {
+fn plan_from_catalog_keeps_selected_deploy_argv() {
     let (app, root) = demo_app();
-    match plan_from_catalog(&app.state, "env:deploy", &PaletteArgs::default()) {
-        Ok(StagedPlan::Workflow { plan, .. }) => {
-            assert_eq!(plan.steps[0].argv[0], "backup:create");
-            let deploy = plan.steps.last().unwrap();
-            assert_eq!(deploy.argv[0], "env:deploy");
-            assert!(deploy.argv.iter().any(|a| a == "--sync-content"));
-            assert_eq!(plan.safety, SafetyTier::Destructive);
+    let args = PaletteArgs {
+        values: vec![("site_env".into(), "dd-wordpress.test".into())],
+        toggles: vec!["--cc".into()],
+        extra: vec![],
+        element: None,
+    };
+    match plan_from_catalog(&app.state, "env:deploy", &args) {
+        Ok(StagedPlan::One(plan)) => {
+            assert_eq!(
+                plan.argv,
+                vec![
+                    "env:deploy".to_string(),
+                    "dd-wordpress.test".to_string(),
+                    "--cc".to_string()
+                ]
+            );
+            assert!(!plan.argv.iter().any(|a| a.contains("backup")));
+            assert!(!plan.argv.iter().any(|a| a == "--sync-content"));
         }
-        other => panic!("expected backup-first deploy, got {other:?}"),
+        other => panic!("expected selected deploy argv, got {other:?}"),
     }
     let _ = fs::remove_dir_all(root);
 }
@@ -216,8 +226,8 @@ fn colon_opens_palette_and_submit_does_not_auto_run() {
     app.handle_key(key(KeyCode::Enter)).unwrap();
     assert!(app.state.modal.is_none());
     match app.state.current.as_ref() {
-        Some(StagedPlan::Workflow { plan, .. }) => {
-            assert_eq!(plan.steps.last().unwrap().argv[0], "env:wipe");
+        Some(StagedPlan::One(plan)) => {
+            assert_eq!(plan.argv[0], "env:wipe");
         }
         other => panic!("expected staged wipe, got {other:?}"),
     }

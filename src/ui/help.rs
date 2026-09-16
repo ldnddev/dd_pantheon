@@ -10,7 +10,6 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect, scroll: u16) {
     lines.push(line("F1", "Help"));
     lines.push(line("F2", "Theme"));
     lines.push(line("F3", "Doctor (refresh via job runner)"));
-    lines.push(line("F4", "Cycle layout A → B → C"));
     lines.push(line("Ctrl+Q", "Quit"));
     lines.push(line("Tab / S-Tab", "Cycle panes"));
     lines.push(line("Esc", "Close modal / clear filter"));
@@ -20,7 +19,7 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect, scroll: u16) {
     ));
     lines.push(line(
         ":",
-        "Terminus/Lando commands (type `lando` to filter; non-init Lando is grayed without a Pantheon .lando.yml)",
+        "Terminus/Lando commands as selected (type `lando` to filter; non-init Lando is grayed without a Pantheon .lando.yml)",
     ));
     lines.push(line("Ctrl+K", "Palette"));
     lines.push(line("Ctrl+L", "Login (machine token)"));
@@ -35,8 +34,8 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect, scroll: u16) {
     lines.push(line("r", "Refresh inventory + metrics + backups (live)"));
     lines.push(line("b", "Stage backup:create (env row; Enter runs)"));
     lines.push(line(
-        "Actions",
-        "Restore backup… / backup URL (get prints URL, no download)",
+        ":",
+        "Restore backup / backup URL via palette (get prints URL, no download)",
     ));
     lines.push(line(
         "e",
@@ -53,19 +52,18 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect, scroll: u16) {
     lines.push(line("n", "Create site wizard (org + name + upstream)"));
     lines.push(line(
         "(no W)",
-        "Wipe is Actions only (backup-first; live is LiveGate)",
+        "Wipe is palette-only (backup-first; live is LiveGate)",
     ));
     lines.push(line(
-        "Actions",
-        "domains / HTTPS / lock (password redacted)",
+        ":",
+        "domains / HTTPS / lock via palette (password redacted)",
     ));
     lines.push(line("x", "Remove selected tag chip (inspector)"));
     lines.push(line("[ / ]", "Cycle tag chips (inspector)"));
 
     push_header(&mut lines, state, "Inspector");
-    lines.push(line("j/k", "Scroll inspector (C: Actions / tabs)"));
-    lines.push(line("Enter", "Stage action (demo: no spawn); wake is here"));
-    lines.push(line("1-4", "C tabs: Info Metrics Local Actions"));
+    lines.push(line("j/k", "Scroll inspector"));
+    lines.push(line("Enter", "Run the staged plan (same as preview)"));
     lines.push(line(
         "d / w / Shift+M",
         "Metrics period (env row; m is CMS)",
@@ -105,17 +103,6 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect, scroll: u16) {
         "Focus pane / select tree row / period labels",
     ));
     lines.push(line("wheel", "Scroll hovered pane"));
-
-    push_header(&mut lines, state, "Layouts");
-    lines.push(Line::from(
-        "A Classic stack (default): sites | inspector / command preview; log full width",
-    ));
-    lines.push(Line::from(
-        "B Three-column: sites | inspector | preview/log",
-    ));
-    lines.push(Line::from(
-        "C Tabbed inspector; log collapses to “Job log — idle”",
-    ));
 
     let p = Paragraph::new(lines)
         .wrap(Wrap { trim: false })

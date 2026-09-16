@@ -3,7 +3,7 @@ use crate::catalog::{
 };
 use crate::config::push_history;
 use crate::models::Framework;
-use crate::plan::{CommandPlan, PlanTarget, SafetyTier, StagedPlan, ToolKind, WorkflowPlan};
+use crate::plan::{CommandPlan, PlanTarget, SafetyTier, StagedPlan, ToolKind};
 use crate::safety::hint_from_name;
 use crate::state::{AppState, Modal, PaletteForm, TreeSel};
 use crate::toast::ToastLevel;
@@ -64,23 +64,12 @@ impl PaletteArgs {
 #[derive(Debug)]
 pub enum CatalogError {
     Message(String),
-    NeedsDiffstat {
-        site: String,
-        env: String,
-        mode: String,
-    },
 }
 
 impl std::fmt::Display for CatalogError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Message(m) => f.write_str(m),
-            Self::NeedsDiffstat { site, env, .. } => {
-                write!(
-                    f,
-                    "connection:set git requires a clean env:diffstat ({site}.{env})"
-                )
-            }
         }
     }
 }
@@ -434,16 +423,6 @@ pub fn submit(state: &mut AppState, form: PaletteForm) {
             state.current = Some(plan);
             // Palette never auto-runs.
         }
-        Err(CatalogError::NeedsDiffstat { site, env, mode }) => {
-            push_history(
-                &mut state.config.config.history.palette,
-                history_line(&name, &args),
-            );
-            state.config.mark_dirty();
-            state.modal = None;
-            state.pending_connection_set = Some((site.clone(), env.clone(), mode));
-            crate::workflows::deploy::request_diffstat(state, &site, &env);
-        }
         Err(CatalogError::Message(msg)) => {
             state.show_toast(ToastLevel::Warning, msg);
             state.modal = Some(Modal::Palette {
@@ -460,20 +439,7 @@ pub fn plan_from_catalog(
     name: &str,
     args: &PaletteArgs,
 ) -> Result<StagedPlan, CatalogError> {
-    match command_key(name) {
-        "env:deploy" => route_deploy(state, args),
-        "connection:set" => route_connection_set(state, args),
-        "env:clone-content" => route_clone(state, args),
-        "env:wipe" => route_wipe(state, args),
-        "backup:restore" => route_restore(state, args),
-        "lando push" => route_lando_push(state, args),
-        "lando pull" => route_lando_pull(state),
-        "lando rebuild" => route_lando_rebuild(state),
-        "lando destroy" => route_lando_destroy(state),
-        "multidev:delete" => route_multidev_delete(state, args),
-        "domain:remove" => route_domain_remove(state, args),
-        _ => Ok(generic_plan(state, name, args)?),
-    }
+    generic_plan(state, name, args)
 }
 
 fn err(msg: impl Into<String>) -> CatalogError {
@@ -501,255 +467,6 @@ pub fn parse_site_env(raw: &str) -> Option<(String, String)> {
         return None;
     }
     Some((site.to_string(), env.to_string()))
-}
-
-fn require_local(state: &AppState) -> Result<(PathBuf, Option<String>), CatalogError> {
-    let site = state
-        .selected_site()
-        .ok_or_else(|| err("select a site with a local path"))?;
-    let local = site
-        .local
-        .as_ref()
-        .ok_or_else(|| err("no local path bound"))?;
-    Ok((local.path.clone(), Some(site.name.clone())))
-}
-
-fn route_deploy(state: &AppState, args: &PaletteArgs) -> Result<StagedPlan, CatalogError> {
-    let (site, env) = require_site_env(state, args)?;
-    let updatedb = args.has("--updatedb") || crate::workflows::deploy::wants_updatedb(state, &site);
-    let sync = env == "test";
-    let deploy = crate::workflows::deploy::plan_deploy(
-        state.tools.terminus_path(),
-        &site,
-        &env,
-        crate::workflows::deploy::DEFAULT_NOTE,
-        sync,
-        updatedb,
-    );
-    if sync {
-        let target = PlanTarget::Env {
-            site: site.clone(),
-            env: env.clone(),
-        };
-        let mut steps = crate::safety::backup_first(state.tools.terminus_path(), &target);
-        steps.push(deploy);
-        let safety = steps
-            .iter()
-            .map(|s| s.safety)
-            .max()
-            .unwrap_or(SafetyTier::Destructive);
-        Ok(StagedPlan::Workflow {
-            plan: WorkflowPlan {
-                title: format!("deploy {site}.{env}"),
-                why: format!("backup-first deploy to {site}.{env}"),
-                safety,
-                steps,
-                stop_on_failure: true,
-            },
-            step: 0,
-        })
-    } else {
-        Ok(StagedPlan::One(deploy))
-    }
-}
-
-fn route_connection_set(state: &AppState, args: &PaletteArgs) -> Result<StagedPlan, CatalogError> {
-    let (site, env) = require_site_env(state, args)?;
-    let mode = args
-        .value("mode")
-        .map(|s| s.to_string())
-        .or_else(|| args.extra.iter().find(|a| !a.starts_with('-')).cloned())
-        .ok_or_else(|| err("fill mode (git or sftp)"))?;
-    if mode == "git" {
-        return Err(CatalogError::NeedsDiffstat { site, env, mode });
-    }
-    crate::workflows::deploy::plan_connection_set(
-        state.tools.terminus_path(),
-        &site,
-        &env,
-        &mode,
-        false,
-    )
-    .map(StagedPlan::One)
-    .map_err(|b| err(b.message))
-}
-
-fn route_clone(state: &AppState, args: &PaletteArgs) -> Result<StagedPlan, CatalogError> {
-    let (mut origin_site, mut origin) = if let Some(raw) = args.value("site_env") {
-        parse_site_env(raw).ok_or_else(|| err(format!("invalid origin `{raw}`")))?
-    } else {
-        match &state.selected {
-            TreeSel::Env { site, env } if env != "live" => (site.clone(), "live".into()),
-            TreeSel::Env { site, .. } => (site.clone(), "dev".into()),
-            TreeSel::Site(site) => (site.clone(), "live".into()),
-            TreeSel::None => return Err(err("select an environment")),
-        }
-    };
-    let target = args
-        .value("to_environment")
-        .or_else(|| args.value("target_env"))
-        .map(|s| {
-            parse_site_env(s)
-                .map(|(_, e)| e)
-                .unwrap_or_else(|| s.to_string())
-        })
-        .or_else(|| match &state.selected {
-            TreeSel::Env { env, .. } => Some(env.clone()),
-            _ => None,
-        })
-        .ok_or_else(|| err("fill to_environment"))?;
-    if origin_site.is_empty() {
-        origin_site = state
-            .selected_site()
-            .map(|s| s.name.clone())
-            .unwrap_or_default();
-    }
-    if origin == target {
-        origin = if target == "live" {
-            "dev".into()
-        } else {
-            "live".into()
-        };
-    }
-    let cc = args.has("--cc");
-    let db_only = args.has("--db-only");
-    let files_only = args.has("--files-only");
-    let updatedb =
-        args.has("--updatedb") || crate::workflows::deploy::wants_updatedb(state, &origin_site);
-    if db_only && files_only {
-        return Err(err("pick db-only or files-only, not both"));
-    }
-    Ok(StagedPlan::Workflow {
-        plan: crate::workflows::content::plan_clone_workflow(
-            state.tools.terminus_path(),
-            &origin_site,
-            &origin,
-            &target,
-            cc,
-            db_only,
-            files_only,
-            updatedb,
-        ),
-        step: 0,
-    })
-}
-
-fn route_wipe(state: &AppState, args: &PaletteArgs) -> Result<StagedPlan, CatalogError> {
-    let (site, env) = require_site_env(state, args)?;
-    Ok(StagedPlan::Workflow {
-        plan: crate::workflows::content::plan_wipe(state.tools.terminus_path(), &site, &env),
-        step: 0,
-    })
-}
-
-fn route_restore(state: &AppState, args: &PaletteArgs) -> Result<StagedPlan, CatalogError> {
-    let (site, env) = require_site_env(state, args)?;
-    let file = args
-        .value("file")
-        .map(|s| s.to_string())
-        .or_else(|| {
-            args.extra.iter().find_map(|a| {
-                a.strip_prefix("--file=")
-                    .map(|s| s.to_string())
-                    .or_else(|| (a == "--file").then(|| String::new()))
-            })
-        })
-        .filter(|s| !s.is_empty());
-    Ok(StagedPlan::Workflow {
-        plan: crate::workflows::backup::restore_workflow(
-            state.tools.terminus_path(),
-            &site,
-            &env,
-            file.as_deref(),
-        ),
-        step: 0,
-    })
-}
-
-fn route_lando_push(state: &AppState, args: &PaletteArgs) -> Result<StagedPlan, CatalogError> {
-    let (path, site) = require_local(state)?;
-    let mut code = "dev";
-    let mut database = "none";
-    let mut files = "none";
-    for a in &args.extra {
-        if let Some(v) = a.strip_prefix("--code=") {
-            code = v;
-        } else if let Some(v) = a.strip_prefix("--database=") {
-            database = v;
-        } else if let Some(v) = a.strip_prefix("--files=") {
-            files = v;
-        }
-    }
-    Ok(StagedPlan::One(crate::workflows::local::plan_push(
-        state.tools.lando_path(),
-        path,
-        site,
-        code,
-        database,
-        files,
-    )))
-}
-
-fn route_lando_pull(state: &AppState) -> Result<StagedPlan, CatalogError> {
-    let (path, site) = require_local(state)?;
-    Ok(StagedPlan::One(crate::workflows::local::plan_pull(
-        state.tools.lando_path(),
-        path,
-        site,
-        "none",
-        "live",
-        "live",
-    )))
-}
-
-fn route_lando_rebuild(state: &AppState) -> Result<StagedPlan, CatalogError> {
-    let (path, site) = require_local(state)?;
-    Ok(StagedPlan::One(crate::workflows::local::plan_rebuild(
-        state.tools.lando_path(),
-        path,
-        site,
-    )))
-}
-
-fn route_lando_destroy(state: &AppState) -> Result<StagedPlan, CatalogError> {
-    let (path, site) = require_local(state)?;
-    Ok(StagedPlan::One(crate::workflows::local::plan_destroy(
-        state.tools.lando_path(),
-        path,
-        site,
-    )))
-}
-
-fn route_multidev_delete(state: &AppState, args: &PaletteArgs) -> Result<StagedPlan, CatalogError> {
-    let (site, env) = require_site_env(state, args)?;
-    if matches!(env.as_str(), "dev" | "test" | "live") {
-        return Err(err(
-            "multidev:delete is for Multidev envs, not dev/test/live",
-        ));
-    }
-    Ok(StagedPlan::One(crate::workflows::multidev::plan_delete(
-        state.tools.terminus_path(),
-        &site,
-        &env,
-        args.has("--delete-branch"),
-    )))
-}
-
-fn route_domain_remove(state: &AppState, args: &PaletteArgs) -> Result<StagedPlan, CatalogError> {
-    let (site, env) = require_site_env(state, args)?;
-    let domain = args
-        .value("domain")
-        .map(|s| s.to_string())
-        .or_else(|| args.extra.iter().find(|a| !a.starts_with('-')).cloned())
-        .ok_or_else(|| err("fill domain"))?;
-    Ok(StagedPlan::One(
-        crate::workflows::domains::plan_domain_remove(
-            state.tools.terminus_path(),
-            &site,
-            &env,
-            &domain,
-        ),
-    ))
 }
 
 fn generic_plan(

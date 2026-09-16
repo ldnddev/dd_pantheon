@@ -1,4 +1,4 @@
-use crate::models::{LayoutId, MetricsPeriod, SiteOverlay};
+use crate::models::{MetricsPeriod, SiteOverlay};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -10,8 +10,6 @@ pub const CONFIG_WRITE_DEBOUNCE: Duration = Duration::from_millis(500);
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AppConfig {
-    #[serde(default)]
-    pub layout: LayoutId,
     #[serde(default)]
     pub last_site: Option<String>,
     #[serde(default)]
@@ -59,7 +57,6 @@ pub fn push_history(list: &mut Vec<String>, line: impl Into<String>) {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            layout: LayoutId::ClassicStack,
             last_site: None,
             last_env: None,
             metrics_period: MetricsPeriod::Day,

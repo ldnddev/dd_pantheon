@@ -14,7 +14,7 @@
 
 `dd_pantheon` is a Rust + Ratatui TUI that is a **guided operations cockpit** for Pantheon-hosted WordPress and Drupal sites. It never talks to the Pantheon HTTP API. Every remote or local action is a subprocess of **Terminus** or **Lando** (and `git push` for git-mode deploys). Every action is first a `CommandPlan`: the operator always sees the exact argv, cwd, safety tier, and target before anything is spawned. The TUI exists to teach Terminus/Lando while making the dangerous paths hard to take by accident.
 
-v1 is a **hybrid cockpit**: a small set of first-class workflows for daily site ops (inventory, tags, metrics, backup, deploy, Lando, create, multidev, content, domains, CMS command form) plus a searchable command palette that can run any discovered Terminus/Lando command through the same preview → confirm → job-log path. We do **not** build 161 dedicated screens. Layout is a first-class lab: three body layouts share the same chrome and widgets, cycled with `F4`, so the operator can pick a favorite in a running TUI before we lock a default.
+v1 is a **hybrid cockpit**: a small set of first-class workflows for daily site ops (inventory, tags, metrics, backup, deploy, Lando, create, multidev, content, domains, CMS command form) plus a searchable command palette that can run any discovered Terminus/Lando command through the same preview → confirm → job-log path. We do **not** build 161 dedicated screens. The body is the classic stack: sites tree | inspector / command preview, with a full-width job log underneath.
 
 Verified local toolchain (2026-08-31): Terminus **4.3.2** (161 commands via `terminus list`), Lando **v3.26.8**, `terminus auth:whoami` **not logged in** (exit 0, empty stdout, `You are not logged in.` on stderr). The app must launch anyway and surface a login modal. That whoami triple is `AuthState::LoggedOut`, not a JSON parse bug.
 
@@ -29,7 +29,7 @@ Pain points this app owns:
 1. **The teaching gap.** Operators who live in Terminus still fat-finger `--yes` and `--database`. A TUI that hides the command makes that worse. A TUI that *always* shows the command makes the operator better at the CLI.
 2. **Safety is a conversation, not a flag.** Terminus will happily take `-y`. We never pass `--yes` unless a TUI modal already collected the confirmation. Destructive and LiveGate actions require repeating the argv and typing a gate word.
 3. **Long jobs freeze a naive TUI.** `lando start`, backups, clones, and `workflow:wait` take minutes. The Ratatui loop must stay at 10 fps while a process group streams stdout.
-4. **Layout is not obvious yet.** Sibling apps (dd_dotstore master/detail, dd_ftp dual-pane) have locked bodies that we must **not** copy. The operator wants to *feel* three candidate bodies with dummy data before we couple the rest of the app to one split.
+4. **The body is classic stack.** Sites tree on the left spanning inspector + command preview; job log full width underneath. Narrow terminals (`<80` cols) stack the same panes vertically.
 
 Current state: empty crate. Visual contract is already in-tree (`LDNDDEV_TUI_VISUAL_STANDARD.md`, v1). Family patterns to steal from: dd_dotstore's single-crate loop (`src/main.rs` poll-100ms + `App` glue), dd_ftp's theme lookup/token mapping (`crates/dd_ftp_ui/src/theme.rs`), dd_siteforge's spec tone (`docs/SPEC.md`). Domain rules to encode: the dd-pantheon skill and `references/{lando,wordpress,drupal}.md`. Runtime coupling: **none** — we shell out.
 
@@ -47,7 +47,7 @@ Current state: empty crate. Visual contract is already in-tree (`LDNDDEV_TUI_VIS
 - Async job runner: stream stdout/stderr, cancel via SIGTERM to the process group, one mutating job per target env.
 - Tags as chips + tree filter + add/remove modal (`tag:list|add|remove`, org-scoped).
 - Metrics dashboard from `env:metrics` only (Sparkline + Gauge + table; no BarChart in v1). Honest about what it is: coarse Pantheon visits/pages/cache, lagged, not APM. Env-row only until a logged-in fixture proves `env:metrics <site>` is combined rather than live.
-- Layout lab: three body layouts, `F4` cycle, persist last choice.
+- Classic body: sites | inspector / preview; job log full width. Narrow terminals stack vertically.
 - Visual-standard chrome: 3-line header, 1-line footer starting `F1:Help`, F1 Help + F2 Theme, canonical tokens only.
 
 ### Non-Goals (v1)
@@ -74,13 +74,13 @@ Current state: empty crate. Visual contract is already in-tree (`LDNDDEV_TUI_VIS
 4. **No silent `--yes`.** The runner injects flags; keybindings never do. After `safety::gate_passed`: Terminus always gets `--no-interaction` (unless already in argv) plus `--yes` when `confirm_with_yes`; Lando gets `--yes`/`-y` the same way when `confirm_with_yes`; Git never gets either flag. Preview of Mutating / Destructive / LiveGate always shows this **post-confirm argv** (including `--yes`). There is no “note added after confirm” fork. `stdin(Stdio::null())` always. Rationale: "no silent yes" means the *operator* is never skipped, not that Terminus must be left interactive inside a raw-mode TUI.
 5. **Main-thread Ratatui loop + std thread + bounded mpsc for jobs.** Not tokio. Channel is `sync_channel(256)` with coalesce-on-full. Rationale: we spawn local processes, we do not speak HTTP; dd_dotstore's `event::poll(100ms)` loop is the family pattern. See [Async story](#async-story).
 6. **Single crate.** Follow dd_dotstore (`src/lib.rs` + `src/main.rs`), not dd_ftp's eight-crate workspace. Split later if a module actually wants its own crate.
-7. **Layout lab is P0.** Three layouts ship with dummy fixtures before Terminus is wired. Default in config is Classic stack (A). The operator confirms by using it. Switching layout must not drop selection, jobs, or preview state. A/B inspectors host the same Actions widget as C’s Actions tab (not a fourth pane).
+7. **Classic stack is the only body.** Sites tree on the left spanning inspector + command preview; job log full width underneath. Metrics live inside the inspector. There is no layout cycle.
 8. **Inventory ReadOnly auto-runs; other ReadOnly waits for Enter.** Tree expand / site select / env-row metrics (cache miss/stale) fire without an extra keypress, or the cockpit is unusable. Palette ReadOnly, doctor re-run, and manual `r` still go through preview + Enter. **Do not auto-run `env:metrics <site>`** (site row): Terminus 4.3.2 help contradicts itself (combined vs default-live). See [ReadOnly policy](#readonly-policy).
 9. **Default Lando push is code-only.** `--database` other than `none` is LiveGate: type **`database`** (one word, even if dest is live). Type `live` only for Terminus plans whose `PlanTarget::Env.env == "live"`. Rationale: pushing a local DB is the unique danger in `references/lando.md`; two typed tokens is worse UX than one.
 10. **Git-mode deploy is `git push` + `workflow:wait`, not a git UI.** Dirty `env:diffstat` blocks `connection:set git` until the operator picks commit or abort (not discard-from-a-one-key).
 11. **Theme lookup and tokens are law.** `./dd_pantheon_theme.yml` → `~/.config/ldnddev/dd_pantheon_theme.yml` → built-in. `version: 1` only. Missing or other version → **skip that file**, built-in defaults, warning toast + F2 warning. Do not `Err` (dd_dotstore) and do not load an unversioned file (dd_ftp). No invented keys. Cache-hit-ratio uses `success` / `warning` / `error`.
-12. **App config lives at `~/.config/ldnddev/dd_pantheon/config.toml`.** Layout, last selection, per-site **org id**, history, `[locals]` fallback paths. Secrets never. Theme file stays at the visual-standard path (not nested in the app dir).
-13. **`--demo` fixtures are a first-class launch mode.** PR1 is a playable layout lab with dummy `Site` / `Env` / `Tag` / `MetricsSeries`. `--demo` never auto-spawns inventory/metrics/tags. F3 doctor may spawn detect/whoami/list. Login is available but does **not** replace fixtures until `--demo` is off. `--demo` remains after v1 for tests and screenshots.
+12. **App config lives at `~/.config/ldnddev/dd_pantheon/config.toml`.** Last selection, per-site **org id**, history, `[locals]` fallback paths. Secrets never. Theme file stays at the visual-standard path (not nested in the app dir).
+13. **`--demo` fixtures are a first-class launch mode.** Dummy `Site` / `Env` / `Tag` / `MetricsSeries`. `--demo` never auto-spawns inventory/metrics/tags. F3 doctor may spawn detect/whoami/list. Login is available but does **not** replace fixtures until `--demo` is off. `--demo` remains after v1 for tests and screenshots.
 14. **One mutating job per slot.** Slot = `PlanTarget::Env` → `"{site}.{env}"`, `Local` → path, `Site` → site name, **`None` → `"__global__"`** (so two `lando poweroff` collide). Concurrent ReadOnly is allowed (debounced). A second backup/deploy/push against the same slot is refused with a warning toast until the first exits. Global cap: 4 live children.
 15. **Tags are org-scoped.** Resolve org via `site:org:list`. Zero orgs → inspector message, not a crash. Multiple orgs → picker; remember last **org id** per site in config. Display `org_name`.
 16. **Login token: argv is unavoidable on Terminus 4.3.2.** The 4.3.2 phar does **not** define `TERMINUS_MACHINE_TOKEN`. This TUI may *read* that env as an operator/CI convention to pre-fill the modal (never print it); Terminus will not honor it as env. Spawn is `terminus auth:login --machine-token=<token>` in **argv**. `/proc/<pid>/cmdline` exposure for the life of that short process is **accepted**. `extra_env` is **not** the token home — never put the token in both places. Preview/log/debug always redacted.
@@ -124,13 +124,13 @@ src/
   main.rs          # CLI (--demo, --root, -h), raw-mode loop, shutdown
   lib.rs           # module tree
   app.rs           # App { state }: new, draw, handle_key/mouse, tick, save
-  state.rs         # AppState, FocusPane, Modal, selection, layout, job handles
+  state.rs         # AppState, FocusPane, Modal, selection, job handles
   theme.rs         # load/validate visual-standard theme; Theme + ThemeSource
-  input.rs         # key + mouse; modal keys; F1–F4; layout cycle
+  input.rs         # key + mouse; modal keys; F1–F3
   toast.rs         # Toast + ToastLevel; 5s TTL (copy dd_dotstore)
   config.rs        # config.toml + sites.toml overlay; XDG paths
   models.rs        # Site, Env, LocalApp, Tag, MetricsSeries, Framework
-  fixtures.rs      # dummy inventory for --demo and layout-lab tests
+  fixtures.rs      # dummy inventory for --demo and tests
   plan.rs          # CommandPlan, WorkflowPlan, shell rendering, redaction, effective_argv
   safety.rs        # SafetyTier gates; LiveGate prompt; backup-first helpers
   jobs.rs          # spawn, process group, mpsc events, log ring, cancel; calls plan.effective_argv()
@@ -160,10 +160,10 @@ src/
   ui/
     mod.rs         # draw() dispatch: shell + body layout + overlays
     shell.rs       # 3-line header, 1-line footer, app_shell fill
-    layouts.rs     # LayoutId A/B/C + narrow collapse; widget tree
+    layouts.rs     # classic stack + narrow collapse
     tree.rs        # site/env tree, filter, tag chips on rows
-    inspector.rs   # info, tags, local binding; hosts Actions in A/B
-    actions.rs     # Actions list widget (A/B inspector section + C Actions tab)
+    inspector.rs   # info, tags, local binding, metrics
+    actions.rs     # Actions list widget
     preview.rs     # always-on CommandPlan / WorkflowPlan rendering
     log.rs         # job log pane + scrollbar
     metrics.rs     # sparkline, gauge, table, period switcher (no BarChart)
@@ -281,9 +281,7 @@ pub struct AppState {
     pub theme_status: ThemeStatus,
     pub header_copy: String,
     pub demo: bool,                 // --demo: fixtures frozen
-    pub layout: LayoutId,
     pub focus: FocusPane,
-    pub inspector_tab: InspectorTab, // C uses it; A/B keep it so F4 does not drop it
     pub modal: Option<Modal>,
     pub toast: Option<Toast>,
 
@@ -299,7 +297,7 @@ pub struct AppState {
     pub filter: String,
     pub tag_filter: Option<String>,
     pub tree_state: ListState,
-    pub action_state: ListState,    // Actions widget (A/B section + C tab)
+    pub action_state: ListState,    // Actions list selection
     pub log_scroll: u16,
     pub preview_scroll: u16,
     pub inspector_scroll: u16,
@@ -339,7 +337,7 @@ let outer = Layout::default()
     .direction(Direction::Vertical)
     .constraints([
         Constraint::Length(3), // header
-        Constraint::Min(0),    // body (layout lab)
+        Constraint::Min(0),    // body
         Constraint::Length(1), // footer
     ])
     .split(frame.area());
@@ -384,62 +382,28 @@ Short, one line, cockpit personality. Users override via `header_quotes`.
 
 **Footer (adaptive)**
 
-Visual standard §4: always `F1:Help` first, then `F2:Theme`, **then quit**, then the app’s highest-value actions. Truncate from the right. Drop F3/F4 first when narrowing (they remain in F1 Help). No persistent theme-health or progress text.
+Visual standard §4: always `F1:Help` first, then `F2:Theme`, **then quit**, then the app’s highest-value actions. Truncate from the right. Drop F3 first when narrowing (it remains in F1 Help). No persistent theme-health or progress text.
 
 ```text
 # <80 cols
 F1:Help  F2:Theme  C-q:Quit  /:Filter
 
 # medium
-F1: Help   F2: Theme   Ctrl+Q: Quit   F4: Layout   j/k: Nav   Enter: Run   /: Filter   :: Pal
+F1: Help   F2: Theme   Ctrl+Q: Quit   j/k: Nav   Enter: Run   /: Filter   :: Pal
 
 # wide
-F1: Help   F2: Theme   Ctrl+Q: Quit   F3: Doctor   F4: Layout   j/k: Nav   Tab: Pane   Enter: Run   /: Filter   :: Palette   r: Refresh   (mouse: click/scroll)
+F1: Help   F2: Theme   Ctrl+Q: Quit   F3: Doctor   j/k: Nav   Tab: Pane   Enter: Run   /: Filter   :: Palette   r: Refresh   (mouse: click/scroll)
 ```
 
 Full key list lives in F1, not the footer.
 
-### Layout lab (P0)
+### Classic body
 
-Three body layouts, **same chrome**, **same widgets**: site tree, inspector, command preview, job log, metrics, **Actions list**. Metrics live *inside* the inspector in A/B, or the Metrics tab in C — never a fourth persistent pane that fights the preview. Actions is the same `ui/actions.rs` widget: a scrollable list in the A/B inspector (below info/tags/metrics/local) and C’s Actions tab. It is not a fourth pane.
+One body: site tree, inspector (info + metrics), command preview, job log. Metrics live *inside* the inspector — never a fourth persistent pane that fights the preview.
 
-`F4` cycles `ClassicStack → ThreeColumn → TabbedInspector → ClassicStack`. Listed in F1 Help. Footer shows `F4:Layout` when width allows. Persist `layout` in `config.toml` on change (debounced 500ms write). Switching **must not** drop: selected tree row, expanded nodes, current `CommandPlan` / `WorkflowPlan`, job log buffer, in-flight jobs, metrics cache, filter string, modal.
+Widget state lives in `AppState`, not in the layout function. `layouts.rs` only computes `Rect`s.
 
-**Default: A Classic stack** (user decision, 2026-08-31). Rationale: the teaching surface (preview) is a full-width band you cannot miss; the log is a full-width band you cannot miss; master/detail is the shape the visual standard already names. B is denser on ultrawide. C is for operators who want metrics-as-a-tab and a collapsible log. `F4` still cycles B/C; last `F4` choice persists in config. The layout lab (PR 1) still ships so the operator can feel A/B/C; A remains the default until they pick another.
-
-Widget state lives in `AppState`, not in the layout function. Layouts only compute `Rect`s.
-
-#### LayoutId
-
-```rust
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum LayoutId {
-    #[default]
-    ClassicStack,     // A
-    ThreeColumn,      // B
-    TabbedInspector,  // C
-}
-
-impl LayoutId {
-    pub fn cycle(self) -> Self {
-        match self {
-            Self::ClassicStack => Self::ThreeColumn,
-            Self::ThreeColumn => Self::TabbedInspector,
-            Self::TabbedInspector => Self::ClassicStack,
-        }
-    }
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::ClassicStack => "classic",
-            Self::ThreeColumn => "three-column",
-            Self::TabbedInspector => "tabbed",
-        }
-    }
-}
-```
-
-#### A. Classic stack (recommended default)
+#### Classic stack
 
 ```
 ┌─ dd_pantheon ──────────────────────────────────────────────────────────┐
@@ -461,71 +425,15 @@ impl LayoutId {
 │ Job log  backup:create acme-wp.test  running  00:12                    │
 │ [12:01:03] Created backup_20260831_...tgz                              │
 └────────────────────────────────────────────────────────────────────────┘
-F1: Help   F2: Theme   Ctrl+Q: Quit   F4: Layout   j/k: Nav   Enter: Run   :: Palette
+F1: Help   F2: Theme   Ctrl+Q: Quit   j/k: Nav   Enter: Run   :: Palette
 ```
 
 Vertical split of the body:
 
 ```
-sites | inspector     Constraint::Ratio(2,5) / Ratio(3,5)  (min sites 24 cols)
-command preview       Length(5)
-job log               Min(3)
-```
-
-#### B. Three-column
-
-```
-┌─ dd_pantheon ──────────────────────────────────────────────────────────┐
-│ The command is the product.                                            │
-├──────────────┬─────────────────────────────┬───────────────────────────┤
-│ Sites        │ Inspector + metrics         │ Preview                   │
-│ v acme-wp    │ acme-wp.dev                 │ MUTATING  acme-wp.test    │
-│   > test     │ visits  ▁▂▃▅▇▅▃             │ $ terminus backup:create  │
-│     live     │ pages   ▂▃▅▆▇█▇             │   acme-wp.test --element= │
-│ acme-d8      │ cache   ████░  0.91         │   all --yes               │
-│              │ 08-24  1201  4400  0.88     │ why: backup before deploy │
-│              │ 08-25  1340  5102  0.90     │───────────────────────────│
-│              │ period [d] w M   r refresh  │ Job log                   │
-│              │ actions > backup  deploy    │ [12:01:03] Created ...    │
-└──────────────┴─────────────────────────────┴───────────────────────────┘
-F1: Help   F2: Theme   Ctrl+Q: Quit   F4: Layout   Tab: Pane   :: Palette
-```
-
-Horizontal 3-way: `Ratio(1,4) | Ratio(2,4) | Ratio(1,4)`. Right column is preview stacked over log (`Length(8)` preview, `Min(3)` log). Inspector column owns metrics.
-
-#### C. Tabbed inspector
-
-```
-┌─ dd_pantheon ──────────────────────────────────────────────────────────┐
-│ Never --yes in the dark.                                               │
-├──────────────────────────┬─────────────────────────────────────────────┤
-│ Sites                    │ [Info] [Metrics] [Local] [Actions]          │
-│ v acme-wp                │ Visits ▁▂▃▅▇   Pages ▂▃▅▆▇                  │
-│   > test                 │ Cache hit  ████████░░  0.91  (success)      │
-│     live                 │ datetime     visits  pages   ratio          │
-│                          │ 2026-08-30   1340    5102    0.90           │
-├──────────────────────────┴─────────────────────────────────────────────┤
-│ Preview  READ-ONLY  target acme-wp.test                                │
-│ $ terminus env:metrics acme-wp.test --period=day --datapoints=auto     │
-│   --format=json                                                        │
-│ why: refresh platform analytics for the selected env                   │
-├────────────────────────────────────────────────────────────────────────┤
-│ Job log — idle   (stub always present; Tab here to focus even with no job)
-└────────────────────────────────────────────────────────────────────────┘
-F1: Help   F2: Theme   Ctrl+Q: Quit   F4: Layout   1-4: Tabs   r: Refresh
-```
-
-Tabs: `Info | Metrics | Local | Actions`. Keys `1`/`2`/`3`/`4` or `h`/`l` when inspector is focused. Job log **collapses to a 1-line stub** (`Job log — idle`) when no job is running and focus is not the log; expands to `Min(6)` while a job runs, or when the operator Tabs onto the stub. PR 1 **must** draw this stub — without it, C looks like a two-pane app in `--demo`. Preview stays visible.
-
-```rust
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum InspectorTab {
-    #[default]
-    Info,
-    Metrics,
-    Local,
-    Actions,
-}
+sites | inspector     Constraint::Ratio(3,10) / Ratio(7,10)  (min sites 24 cols)
+command preview       Length ~8–11
+job log               ~1/3 of body height, clamped
 ```
 
 #### Narrow terminals (<80 cols)
@@ -538,7 +446,7 @@ Never clip header or footer. Never overflow. Stack vertically. Collapse order:
 4. Preview never goes below 3 lines (shell line + safety + why). If even that fails, we still draw it and let Ratatui clip the *body* of preview, not chrome.
 5. Tree filter `/` and modals use the full body rect.
 
-`<80` also uses the terse footer. LayoutId is preserved: widening the terminal restores A/B/C from config, still without dropping state.
+`<80` also uses the terse footer. Widening the terminal restores the classic split without dropping state.
 
 #### Layout widget tree
 
@@ -549,9 +457,7 @@ flowchart TB
   Frame --> Footer["Footer h=1"]
   subgraph Body
     direction TB
-    A["A ClassicStack: sites|inspector / preview / log"]
-    B["B ThreeColumn: sites | inspector+metrics | preview/log"]
-    C["C Tabbed: sites | tabs / preview / log?"]
+    Classic["classic: sites | inspector / preview ; log full width"]
   end
   Body --> Overlay["Modal + Toast"]
 ```
@@ -855,7 +761,7 @@ pub struct ToolBinary {
 
 Use the `which` crate. Version commands: `terminus --version`, `lando version`, `git --version` (ReadOnly, 15 s). Doctor also runs `terminus auth:whoami` **without** treating empty stdout as a JSON bug (see JSON exceptions). PR 2 may call these via blocking `Command::output`; PR 3 migrates them onto the job runner.
 
-Launch behavior if Terminus is missing: app still starts, banner toast `error` "terminus not on PATH", inventory empty, login modal disabled, palette empty, layout lab still works (`--demo` fixtures if `--demo`, else empty tree + inspector explanation). Same for Lando (local workflows disabled) and Git (deploy step `git push` disabled).
+Launch behavior if Terminus is missing: app still starts, banner toast `error` "terminus not on PATH", inventory empty, login modal disabled, palette empty (`--demo` fixtures if `--demo`, else empty tree + inspector explanation). Same for Lando (local workflows disabled) and Git (deploy step `git push` disabled).
 
 **Auth.** `terminus auth:whoami` on this machine (2026-08-31, 4.3.2): **exit 0**, empty stdout, stderr `You are not logged in.` That triple is **`AuthState::LoggedOut`**, a normal launch state — not `JobStatus::Failed` and not a parse bug.
 
@@ -1011,7 +917,7 @@ Terminus 4.3.2 usage text says `env:metrics <site>` “displays the combined met
 
 **Cache.** In-memory `HashMap<(target_key, MetricsPeriod), CachedSeries>`. Stale after **15 minutes**. Auto-fetch on show if missing/stale. `r` force-refresh. Do not persist metrics to disk.
 
-**Widgets** (inspector in A/B, Metrics tab in C):
+**Widgets** (inside the inspector):
 
 - Visits sparkline (`info` fg).
 - Pages-served sparkline (`text_active_focus` fg).
@@ -1020,7 +926,7 @@ Terminus 4.3.2 usage text says `env:metrics <site>` “displays the combined met
   - `ratio >= 0.50` → `warning`
   - else → `error`
 - Small table of last N points (N = min(14, len)): datetime, visits, pages, ratio.
-- Period switcher: painted labels `[d] w M`; **keys `d` / `w` / `Shift+M`**. Lowercase `m` is **CMS everywhere** (tree, inspector A/B/C, Actions). A/B inspector never uses `m` for month. Mouse click on a period label still selects it. `Shift+M` works whenever metrics are visible (C Metrics tab, or A/B inspector metrics section).
+- Period switcher: painted labels `[d] w M`; **keys `d` / `w` / `Shift+M`**. Lowercase `m` is **CMS everywhere** (tree, inspector, Actions). The inspector never uses `m` for month. Mouse click on a period label still selects it. `Shift+M` works whenever metrics are visible.
 
 **Empty/error states**
 
@@ -1163,15 +1069,15 @@ v1 does **not** include plugin-update UI. `wp plugin list` is a history preset.
 
 ### Dummy fixtures (PR1)
 
-`src/fixtures.rs` must be enough to *feel* layouts without Terminus:
+`src/fixtures.rs` must be enough to *feel* the cockpit without Terminus:
 
 - 3 sites: `acme-wp` (wordpress, tags `prod`/`client-acme`, local path), `acme-d10` (drupal, `composer_managed`, tags `prod`), `frozen-lab` (`frozen: true`, no orgs).
 - Envs: dev/test/live + multidev `feat-x` on acme-wp. Mix of git/sftp, one locked live.
 - Metrics: 14 daily points, cache ratio walking 0.42 → 0.93 so the gauge changes color.
-- A fake current **MUTATING** plan and a few job-log lines (so layout C can show an expanded log; also paint the idle stub when the operator clears it).
-- Dummy Actions list (`backup`, `deploy`, `CMS`, `login`, `lando start`) so A/B inspectors have a surface.
+- A fake current **MUTATING** plan and a few job-log lines.
+- Dummy Actions list (`backup`, `deploy`, `CMS`, `login`, `lando start`).
 
-`--demo` loads these and **never auto-spawns** Terminus/Lando/Git for inventory, metrics, or tags. F3 doctor may spawn detect/whoami/list (ReadOnly). Login remains available but does not replace fixtures until `--demo` is off. Enter on a fixture-staged plan toasts `demo: no spawn`. `DEMO` badge on the inspector title (`warning` token). F4 still persists layout to config. Layout C **must** draw the 1-line `Job log — idle` stub. This is how the operator answers the layout open question.
+`--demo` loads these and **never auto-spawns** Terminus/Lando/Git for inventory, metrics, or tags. F3 doctor may spawn detect/whoami/list (ReadOnly). Login remains available but does not replace fixtures until `--demo` is off. Enter on a fixture-staged plan toasts `demo: no spawn`. `DEMO` badge on the inspector title (`warning` token).
 
 ### Keybindings (v1)
 
@@ -1184,7 +1090,6 @@ Keys are **focus-dependent**. When a modal is open, it owns the keyboard (Esc ca
 | F1 | Help modal |
 | F2 | Theme modal |
 | F3 | Doctor |
-| F4 | Cycle layout, persist |
 | Ctrl+Q | Quit (confirm if job running). Works even while a text field is focused. Bare `q` does not quit. |
 | Esc | Close modal / clear filter. Not quit. |
 | Tab / S-Tab | Cycle focus: Tree → Inspector → Preview → Log |
@@ -1213,15 +1118,14 @@ Keys are **focus-dependent**. When a modal is open, it owns the keyboard (Esc ca
 | `r` | Refresh inventory for selection |
 | **no `W`** | Wipe is Actions / palette only |
 
-**Inspector focused** (A/B: scrollable info + Actions list; C: current tab):
+**Inspector focused:**
 
 | Key | Action |
 |---|---|
-| j/k | Move Actions list (A/B, or C Actions tab) / scroll info |
+| j/k | Scroll info |
 | Enter | Stage the selected Actions row (same constructors as the keys above) |
-| 1/2/3/4 | C only: Info / Metrics / Local / Actions |
-| h/l | C only: previous/next tab |
-| `d` / `w` / `Shift+M` | Metrics period when metrics are visible (C Metrics tab, or A/B metrics section). **Never lowercase `m`.** |
+| h/l | Cycle tag chips |
+| `d` / `w` / `Shift+M` | Metrics period when metrics are visible. **Never lowercase `m`.** |
 | `b` `c` `e` `s` `S` `n` `m` `a` `r` | Same as tree (`m` = CMS form) |
 | `y` | no-op (copy is preview-only) |
 
@@ -1249,7 +1153,7 @@ Wipe: **no `W` binding.** Actions list row `Wipe environment…` + palette `env:
 
 ### Module-level UI drawing
 
-`ui/mod.rs::draw` paints shell, then `layouts::split(layout, body_rect, state) -> PaneRects`, then each widget, then modal, then toast. Capture rects onto `AppState` every frame (`tree_area`, `inspector_area`, `preview_area`, `log_area`, `footer_area`, scrollbar rects). Same pattern as dd_ftp `LayoutMap` (`crates/dd_ftp_ui/src/layout.rs`) but with our panes.
+`ui/mod.rs::draw` paints shell, then `layouts::split(body_rect, state) -> PaneRects`, then each widget, then modal, then toast. Capture rects onto `AppState` every frame (`tree_area`, `inspector_area`, `preview_area`, `log_area`, `footer_area`, scrollbar rects). Same pattern as dd_ftp `LayoutMap` (`crates/dd_ftp_ui/src/layout.rs`) but with our panes.
 
 ---
 
@@ -1287,7 +1191,6 @@ No existing schema. On-disk files:
 ```toml
 # dd_pantheon app config. No secrets.
 # All scalars and arrays MUST sit before tables (valid TOML).
-layout = "classic_stack"          # classic_stack | three_column | tabbed_inspector
 last_site = "acme-wp"
 last_env = "dev"
 metrics_period = "day"            # day | week | month
@@ -1309,7 +1212,7 @@ acme-wp = "/home/jlyvers/sites/acme-wp"
 
 **Local path home:** `sites.toml` `local_path` is the operator registry (policy + path). `config.toml` `[locals]` is a fallback for Terminus-discovered sites the operator bound this session without adding a registry entry. When the operator binds a path: write `sites.toml` if that site already has an overlay entry, else write `[locals]`. Never keep two conflicting sources without this order.
 
-Write atomically (temp + rename). Debounce 500 ms after F4 / selection change. Missing file → defaults (`LayoutId::ClassicStack`). Unknown `layout` value → default + warning toast.
+Write atomically (temp + rename). Debounce 500 ms after selection change. Missing file → defaults.
 
 **Why this path:** visual-standard theme files stay at `~/.config/ldnddev/<APP>_theme.yml`. App *state* needs a directory for config + sites overlay + future files; XDG convention `~/.config/ldnddev/dd_pantheon/` matches "one dir per app" without colliding with the theme filename. Debug log is XDG *state*, not config: `~/.local/state/ldnddev/dd_pantheon/app.log` (`dirs::state_dir()`).
 
@@ -1426,7 +1329,7 @@ pub const CACHE_WARN: f64 = 0.50;
 
 ### Migration
 
-None. First write of `config.toml` happens on first F4 or clean quit. If TOML parse fails: defaults + error modal (blocking), do not overwrite the broken file until the operator confirms "reset config".
+None. First write of `config.toml` happens on first selection change or clean quit. If TOML parse fails: defaults + error modal (blocking), do not overwrite the broken file until the operator confirms "reset config".
 
 ---
 
@@ -1452,15 +1355,14 @@ None. First write of `config.toml` happens on first F4 or clean quit. If TOML pa
 
 See [Async story](#async-story). Chosen: std thread + mpsc. tokio is the right call for dd_ftp's sockets, not for `Command::spawn`. Polling children on the UI thread risks stalling draw.
 
-### 5. Layout locked in design vs layout lab
+### 5. Body layout
 
-- **Lock A now.** Faster implementation, risk of "this feels like dd_dotstore" regret. Operator explicitly asked to play.
-- **Lab (chosen).** Three layouts, dummy data first, persist the winner. Cost: layout code must stay state-agnostic (already required). F4 remains a power-user toggle after a favorite is picked.
+Classic stack is the only body: sites | inspector / preview; job log full width. Narrow terminals stack the same panes vertically.
 
 ### 6. Metrics as Grafana-like vs one inspector panel
 
 - **Grafana-like.** Multiple series, compare envs, export. Wrong data source (day-granularity cache ratios) and fights the always-on preview for space.
-- **One panel (chosen).** Sparkline + Gauge + table + period switcher (no BarChart in v1), inside the inspector (or Metrics tab). Env-row only until a fixture proves site-level argv. Honest about lag and coarseness.
+- **One panel (chosen).** Sparkline + Gauge + table + period switcher (no BarChart in v1), inside the inspector. Env-row only until a fixture proves site-level argv. Honest about lag and coarseness.
 
 ### 7. Hand-rolled theme parser (dd_dotstore) vs serde_yaml (dd_ftp)
 
@@ -1499,11 +1401,11 @@ No telemetry. No network except as a side effect of the binaries we spawn.
 
 **User-visible:** the job log pane is the log. Toasts for success/warning/error/info only (visual standard). Footer is not a status bar.
 
-**Debug log** (optional): `~/.local/state/ldnddev/dd_pantheon/app.log` when `debug_log = true` in config **or** `RUST_LOG` is set. Use `tracing` + `tracing-subscriber` (fmt, no ANSI in the file). Events: layout switch, plan staged (redacted shell line), job start/exit/timeout/cancel, theme source, catalog size, safety blocks. **Never** log argv before redaction. **Never** log `extra_env` values.
+**Debug log** (optional): `~/.local/state/ldnddev/dd_pantheon/app.log` when `debug_log = true` in config **or** `RUST_LOG` is set. Use `tracing` + `tracing-subscriber` (fmt, no ANSI in the file). Events: plan staged (redacted shell line), job start/exit/timeout/cancel, theme source, catalog size, safety blocks. **Never** log argv before redaction. **Never** log `extra_env` values.
 
 **Metrics of the TUI itself** (no extra tokens): none exported. If we need a counter, put it in the debug log.
 
-**Alerting:** n/a for a local TUI. Failed jobs: `error` toast + log pane stays expanded (layout C).
+**Alerting:** n/a for a local TUI. Failed jobs: `error` toast + job log pane.
 
 ---
 
@@ -1511,13 +1413,13 @@ No telemetry. No network except as a side effect of the binaries we spawn.
 
 No servers, no feature flags in the SaaS sense. Rollout is **PR-sized slices** that always leave `main` playable.
 
-**Flag:** `--demo` is the layout-lab / screenshot flag. It stays forever.
+**Flag:** `--demo` is the screenshot / fixture flag. It stays forever.
 
 **Staged enablement inside the binary** (simple `const` / config, not a framework):
 
 - `tools_enabled` after detect
 - `auth` (`AuthState`) after whoami
-- workflows appear in the **shared Actions widget** (A/B inspector section + C Actions tab) and in the focus-dependent keys as their PR lands; unknown keys are no-ops until then. LiveGate + Destructive confirm ship in PR 3, before any consumer.
+- workflows appear in the **Actions list** and in the focus-dependent keys as their PR lands; unknown keys are no-ops until then. LiveGate + Destructive confirm ship in PR 3, before any consumer.
 
 **Rollback:** revert the PR. No data migration. If `config.toml` gains a field, `#[serde(default)]`.
 
@@ -1533,12 +1435,12 @@ No servers, no feature flags in the SaaS sense. Rollout is **PR-sized slices** t
 
 | # | Question | Decision |
 |---|---|---|
-| 1 | Which body layout is the long-term default? | **A Classic stack**, until the operator uses the layout lab and persists another via `F4`. Lab (PR 1) still ships; `F4` still cycles B/C; last choice persists in `config.toml`. |
+| 1 | Which body layout is the long-term default? | **Classic stack only.** |
 | 2 | Cache-hit-ratio color thresholds | **`CACHE_OK = 0.80`**, **`CACHE_WARN = 0.50`**. `>= 0.80` success, `>= 0.50` warning, else error. |
 
 ### Still open
 
-Defaults below stand so implementation is not blocked. Next work is PR 0 + PR 1 (layout lab); do not reopen 1 or 2.
+Defaults below stand so implementation is not blocked. Do not reopen 1 or 2.
 
 | # | Question | Default | How to confirm |
 |---|---|---|---|
@@ -1567,7 +1469,7 @@ Do not block implementation on these.
 | Token in `/proc` during login | Medium | Accepted; disclosed; argv-only; not also in extra_env |
 | `killpg` does not stop Lando's Docker tree | Medium | Toast "if containers still run: lando stop"; no timeout on lando start so we don't SIGKILL mid-pull unless the operator cancels |
 | Not logged in at launch (current machine state) | Medium | First-class empty states; login modal; `--demo` still works |
-| Layout switch drops state | Medium | All widget state in `AppState`; layouts only return `Rect`s; tests cycle F4 |
+| Layout switch drops state | Low | Classic is the only body; widget state lives in `AppState` |
 | Operator treats metrics as APM | Low | Empty-state and help text say "platform visits/pages/cache, lagged" |
 | `tag:list` without org panics | Medium | Org resolver; 0 orgs message |
 | Preview leaks machine token | High | Redaction tests; see Security |
@@ -1578,13 +1480,13 @@ Do not block implementation on these.
 
 ## Testing strategy
 
-Follow dd_dotstore: `#[cfg(test)]` at module bottom + `tests/` for theme and layout.
+Follow dd_dotstore: `#[cfg(test)]` at module bottom + `tests/` for theme and cockpit chrome.
 
 Must-have tests in the PRs that introduce the code:
 
 - Theme: local `version: 1` wins; missing version → `ThemeSource::Default` + warning (**not** `Err`); unsupported version → same fallback; every required key; no hard-coded `Color::Rgb` in `ui/` after load.
-- Shell: header height 3, footer height 1, footer starts with `F1:Help` and puts `Ctrl+Q` / `C-q:Quit` before F3/F4 at 40/80/120/200 cols.
-- Layout: F4 cycles A/B/C; selection + current plan + log survive; `<80` cols uses vertical stack; C idle stub present; DEMO badge in `--demo`; Enter toasts `demo: no spawn`.
+- Shell: header height 3, footer height 1, footer starts with `F1:Help` and puts `Ctrl+Q` / `C-q:Quit` before F3 at 40/80/120/200 cols.
+- Layout: classic stack; `<80` cols uses vertical stack; DEMO badge in `--demo`; Enter toasts `demo: no spawn`.
 - `CommandPlan::redacted_shell_line` hides `--machine-token`. Login `Command` has token in args, not `extra_env`.
 - `CommandPlan::effective_argv` (in `plan.rs` only): Terminus gains `--no-interaction` + `--yes` without dupes; Git does not. `jobs.rs` calls it, does not reimplement.
 - LiveGate refuses `live` deploy until the typed word matches; Lando DB push expects `database` only.
@@ -1650,12 +1552,12 @@ Each PR is independently reviewable and leaves `cargo test` + `cargo run -- --de
 - **Depends on:** none
 - **Changes:** Binary that draws 3-line header (random tagline), empty body, 1-line footer starting `F1:Help` then `F2:Theme` then `Ctrl+Q:Quit`. F1 Help, F2 Theme. Theme lookup: missing/unsupported version → skip file, `ThemeSource::Default`, warning toast (not `Err`). Mouse wheel no-ops. `Ctrl+Q` quits. No Terminus.
 
-### PR 1 — Layout lab + dummy data
+### PR 1 — Classic body + dummy data
 
-- **Title:** `tui: layout lab A/B/C with demo fixtures`
+- **Title:** `tui: classic stack with demo fixtures`
 - **Files:** `src/{fixtures,config,ui/layouts,ui/tree,ui/inspector,ui/actions,ui/preview,ui/log,ui/metrics,input}.rs`
 - **Depends on:** PR 0
-- **Changes:** `--demo` loads dummy Site/Env/Tag/MetricsSeries + dummy Actions list. F4 cycles layouts; persist `layout`. Narrow-terminal collapse. Tab focus (`FocusPane`). **Pane hit-testing + mouse wheel** (needed to feel layouts). Dummy MUTATING plan in preview; dummy log lines; layout C **idle stub** `Job log — idle`; `DEMO` badge (`warning`); Enter toasts `demo: no spawn`. Period labels may paint `[d] w M` but **do not bind `m` to month** (no-op until PR 6 binds `d`/`w`/`Shift+M` and PR 13 binds `m` = CMS). Tests: F4 preserves selection; header/footer heights; `<80` stack; C stub present. **This is the playable lab. Stop here until the operator has an opinion on A/B/C.**
+- **Changes:** `--demo` loads dummy Site/Env/Tag/MetricsSeries + dummy Actions list. Classic stack only. Narrow-terminal collapse. Tab focus (`FocusPane`). **Pane hit-testing + mouse wheel**. Dummy MUTATING plan in preview; dummy log lines; `DEMO` badge (`warning`); Enter toasts `demo: no spawn`. Period labels may paint `[d] w M` but **do not bind `m` to month** (no-op until PR 6 binds `d`/`w`/`Shift+M` and PR 13 binds `m` = CMS). Tests: header/footer heights; `<80` stack.
 
 ### PR 2 — Tool detect + catalog + CommandPlan preview (dry)
 
@@ -1732,7 +1634,7 @@ Each PR is independently reviewable and leaves `cargo test` + `cargo run -- --de
 - **Title:** `edge: domains, https, lock`
 - **Files:** `src/workflows/domains.rs` (rest)
 - **Depends on:** PR 7
-- **Changes:** domain list/add/remove, https info/set (path inputs), lock enable/disable with redacted password. Actions widget (all layouts).
+- **Changes:** domain list/add/remove, https info/set (path inputs), lock enable/disable with redacted password. Actions widget.
 
 ### PR 13 — Palette + CMS form
 
@@ -1743,4 +1645,4 @@ Each PR is independently reviewable and leaves `cargo test` + `cargo run -- --de
 
 ---
 
-*End of draft. Implement from PR 0. Do not skip PR 1 — the layout lab is the first product.*
+*End of draft. Implement from PR 0.*

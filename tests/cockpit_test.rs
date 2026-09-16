@@ -1,6 +1,5 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use dd_pantheon::app::App;
-use dd_pantheon::models::LayoutId;
 use dd_pantheon::state::{FocusPane, Modal, TreeSel};
 use dd_pantheon::ui::footer_keys;
 use std::fs;
@@ -20,18 +19,17 @@ fn key(code: KeyCode) -> KeyEvent {
 }
 
 fn demo_app() -> (App, PathBuf) {
-    let root = temp_path("dd_pantheon_lab");
+    let root = temp_path("dd_pantheon_cockpit");
     fs::create_dir_all(&root).expect("root");
     let app = App::new_demo_in(&root, &root).expect("app");
     (app, root)
 }
 
 #[test]
-fn demo_loads_three_sites_and_classic_layout() {
+fn demo_loads_three_sites() {
     let (app, root) = demo_app();
     assert!(app.state.demo);
     assert_eq!(app.state.sites.len(), 3);
-    assert_eq!(app.state.layout, LayoutId::ClassicStack);
     assert!(
         app.state
             .sites
@@ -54,16 +52,14 @@ fn demo_loads_three_sites_and_classic_layout() {
 }
 
 #[test]
-fn f4_cycles_layout_and_preserves_selection() {
+fn f4_is_not_a_layout_cycle() {
     let (mut app, root) = demo_app();
     app.state.selected = TreeSel::Env {
         site: "acme-wp".into(),
         env: "test".into(),
     };
     app.state.select_matching_row();
-
     app.handle_key(key(KeyCode::F(4))).unwrap();
-    assert_eq!(app.state.layout, LayoutId::ThreeColumn);
     assert_eq!(
         app.state.selected,
         TreeSel::Env {
@@ -71,13 +67,7 @@ fn f4_cycles_layout_and_preserves_selection() {
             env: "test".into()
         }
     );
-
-    app.handle_key(key(KeyCode::F(4))).unwrap();
-    assert_eq!(app.state.layout, LayoutId::TabbedInspector);
-    assert!(app.state.log_collapsed());
-
-    app.handle_key(key(KeyCode::F(4))).unwrap();
-    assert_eq!(app.state.layout, LayoutId::ClassicStack);
+    assert!(app.state.modal.is_none());
     let _ = fs::remove_dir_all(root);
 }
 
@@ -100,6 +90,7 @@ fn footer_starts_with_f1_then_f2_then_quit() {
     assert!(!narrow.contains("F4"));
 
     let medium = footer_keys(100);
+    assert!(!medium.contains("F4"));
     assert!(medium.contains("F1: Help"));
     let f1 = medium.find("F1").unwrap();
     let f2 = medium.find("F2").unwrap();

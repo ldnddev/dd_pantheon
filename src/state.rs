@@ -3,8 +3,8 @@ use crate::config::ConfigStore;
 use crate::fixtures::{DemoData, dummy_backup_plan};
 use crate::jobs::{Job, JobHub, JobId};
 use crate::models::{
-    ActionItem, Backup, Domain, Env, HttpsRow, InspectorTab, LayoutId, LocalApp, LockStatus,
-    MetricsPeriod, MetricsSeries, OrgRef, Site, UpstreamRef, default_actions,
+    ActionItem, Backup, Domain, Env, HttpsRow, LocalApp, LockStatus, MetricsPeriod, MetricsSeries,
+    OrgRef, Site, UpstreamRef, default_actions,
 };
 use crate::plan::{CommandPlan, StagedPlan, ToolKind};
 use crate::theme::{Theme, ThemeStatus};
@@ -437,9 +437,7 @@ pub struct AppState {
     pub header_copy: String,
     pub session_started: String,
     pub demo: bool,
-    pub layout: LayoutId,
     pub focus: FocusPane,
-    pub inspector_tab: InspectorTab,
     pub modal: Option<Modal>,
     pub toast: Option<Toast>,
     pub toast_area: Option<Rect>,
@@ -524,15 +522,11 @@ impl AppState {
             ThemeStatus::healthy(theme.source, theme.version)
         };
 
-        let layout = config.config.layout;
-
         let mut state = Self {
             header_copy: String::new(),
             session_started: chrono::Local::now().format("%Y-%m-%d").to_string(),
             demo: true,
-            layout,
             focus: FocusPane::Tree,
-            inspector_tab: InspectorTab::Info,
             modal: None,
             toast: None,
             toast_area: None,
@@ -621,30 +615,6 @@ impl AppState {
         if self.toast.as_ref().is_some_and(|t| t.is_expired()) {
             self.toast = None;
         }
-    }
-
-    pub fn cycle_layout(&mut self) {
-        let selected = self.selected.clone();
-        let expanded = self.expanded.clone();
-        let current = self.current.clone();
-        let filter = self.filter.clone();
-        let tab = self.inspector_tab;
-        let log = self.log_lines.clone();
-
-        self.layout = self.layout.cycle();
-        self.config.config.layout = self.layout;
-        self.config.mark_dirty();
-        tracing::info!(layout = self.layout.label(), "layout switch");
-
-        self.selected = selected;
-        self.expanded = expanded;
-        self.current = current;
-        self.filter = filter;
-        self.inspector_tab = tab;
-        self.log_lines = log;
-        self.rebuild_tree();
-        self.select_matching_row();
-        self.show_toast(ToastLevel::Info, format!("layout: {}", self.layout.label()));
     }
 
     pub fn rebuild_tree(&mut self) {
@@ -787,16 +757,6 @@ impl AppState {
         }
     }
 
-    pub fn move_actions(&mut self, delta: isize) {
-        if self.actions.is_empty() {
-            return;
-        }
-        let len = self.actions.len() as isize;
-        let cur = self.action_state.selected().unwrap_or(0) as isize;
-        let next = (cur + delta).clamp(0, len - 1) as usize;
-        self.action_state.select(Some(next));
-    }
-
     pub fn site(&self, name: &str) -> Option<&Site> {
         self.sites.iter().find(|s| s.name == name)
     }
@@ -908,12 +868,6 @@ impl AppState {
             TreeSel::None => {}
         }
         self.config.mark_dirty();
-    }
-
-    pub fn log_collapsed(&self) -> bool {
-        self.layout == LayoutId::TabbedInspector
-            && !self.job_running
-            && self.focus != FocusPane::Log
     }
 
     pub fn local_root_hint(&self) -> Option<PathBuf> {

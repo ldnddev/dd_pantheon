@@ -1,7 +1,8 @@
 use crate::state::AppState;
+use crate::ui::loader;
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -10,13 +11,21 @@ pub fn draw_header(f: &mut Frame, state: &AppState, area: Rect) {
     if state.demo && area.width >= 40 {
         title.push_str("  DEMO");
     }
-    let header = Paragraph::new(state.header_copy.as_str()).block(
-        Block::default()
-            .title(title)
-            .borders(Borders::ALL)
-            .border_style(state.theme.active_border)
-            .style(state.theme.app_shell),
-    );
+    let mut block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(state.theme.active_border)
+        .style(state.theme.app_shell);
+    if let Some(frame) = loader::current(state) {
+        block = block.title(
+            Line::from(Span::styled(
+                format!(" {frame} "),
+                state.theme.warning_style,
+            ))
+            .right_aligned(),
+        );
+    }
+    let header = Paragraph::new(state.header_copy.as_str()).block(block);
     f.render_widget(header, area);
 }
 
@@ -31,9 +40,9 @@ pub fn footer_keys(width: u16) -> String {
     let raw = if width < 80 {
         "F1:Help  F2:Theme  C-q:Quit  /:Filter"
     } else if width < 120 {
-        "F1: Help   F2: Theme   Ctrl+Q: Quit   F4: Layout   j/k: Nav   Enter: Run   /: Filter   :: Pal"
+        "F1: Help   F2: Theme   Ctrl+Q: Quit   j/k: Nav   Enter: Run   /: Filter   :: Pal"
     } else {
-        "F1: Help   F2: Theme   Ctrl+Q: Quit   F3: Doctor   F4: Layout   j/k: Nav   Tab: Pane   Enter: Run   /: Filter   :: Palette   r: Refresh   (mouse: click/scroll)"
+        "F1: Help   F2: Theme   Ctrl+Q: Quit   F3: Doctor   j/k: Nav   Tab: Pane   Enter: Run   /: Filter   :: Palette   r: Refresh   (mouse: click/scroll)"
     };
     truncate_from_right(raw, width as usize)
 }

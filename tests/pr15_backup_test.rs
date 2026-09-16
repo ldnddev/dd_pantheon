@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use dd_pantheon::app::App;
 use dd_pantheon::plan::{SafetyTier, StagedPlan};
-use dd_pantheon::state::{BackupPickKind, FocusPane, Modal};
+use dd_pantheon::state::{BackupPickKind, Modal};
 use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -27,14 +27,9 @@ fn demo_app() -> (App, PathBuf) {
 
 fn pick_action(app: &mut App, id: &str) {
     dd_pantheon::workflows::local::refresh_actions(&mut app.state);
-    let idx = app
-        .state
-        .actions
-        .iter()
-        .position(|a| a.id == id)
-        .unwrap_or_else(|| panic!("missing action {id}"));
-    app.state.action_state.select(Some(idx));
-    app.state.focus = FocusPane::Inspector;
+    let found = app.state.actions.iter().any(|a| a.id == id);
+    assert!(found, "missing action {id}");
+    dd_pantheon::workflows::stage_action(&mut app.state, id);
 }
 
 #[test]
@@ -51,7 +46,6 @@ fn restore_test_is_backup_first_destructive() {
     let (mut app, root) = demo_app();
     app.state.demo = false;
     pick_action(&mut app, "backup-restore");
-    app.handle_key(key(KeyCode::Enter)).unwrap();
     assert!(matches!(
         app.state.modal,
         Some(Modal::BackupPick {
@@ -87,7 +81,6 @@ fn restore_test_is_backup_first_destructive() {
 fn get_does_not_write_to_cwd_and_is_readonly() {
     let (mut app, root) = demo_app();
     pick_action(&mut app, "backup-get");
-    app.handle_key(key(KeyCode::Enter)).unwrap();
     assert!(matches!(
         app.state.modal,
         Some(Modal::BackupPick {

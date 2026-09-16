@@ -1,9 +1,7 @@
-use crate::models::{InspectorTab, LayoutId};
 use crate::state::{AppState, FocusPane};
 use crate::ui::pane_block;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap};
 
@@ -11,10 +9,7 @@ pub fn draw(f: &mut Frame, state: &mut AppState, area: Rect) {
     if area.height == 0 {
         return;
     }
-    match state.layout {
-        LayoutId::TabbedInspector => draw_tabbed(f, state, area),
-        LayoutId::ClassicStack | LayoutId::ThreeColumn => draw_stacked(f, state, area),
-    }
+    draw_stacked(f, state, area);
 }
 
 fn inspector_title(state: &AppState) -> String {
@@ -63,44 +58,6 @@ fn draw_stacked(f: &mut Frame, state: &mut AppState, area: Rect) {
         draw_info(f, state, chunks[0]);
         crate::ui::metrics::draw_dashboard(f, state, chunks[1]);
     }
-}
-
-fn draw_tabbed(f: &mut Frame, state: &mut AppState, area: Rect) {
-    let focused = state.focus == FocusPane::Inspector;
-    let tabs = tab_line(state);
-    let block = pane_block(tabs, focused, &state.theme).title(inspector_title(state));
-    let inner = block.inner(area);
-    f.render_widget(block, area);
-
-    match state.inspector_tab {
-        InspectorTab::Info => draw_info(f, state, inner),
-        InspectorTab::Metrics => crate::ui::metrics::draw(f, state, inner, false),
-        InspectorTab::Local => draw_local(f, state, inner),
-        InspectorTab::Actions => crate::ui::actions::draw(f, state, inner, "actions"),
-    }
-}
-
-fn tab_line(state: &AppState) -> Line<'static> {
-    let tabs = [
-        InspectorTab::Info,
-        InspectorTab::Metrics,
-        InspectorTab::Local,
-        InspectorTab::Actions,
-    ];
-    let mut spans = Vec::new();
-    for (i, tab) in tabs.iter().enumerate() {
-        if i > 0 {
-            spans.push(Span::raw(" "));
-        }
-        let selected = state.inspector_tab == *tab;
-        let style = if selected {
-            state.theme.active_label.add_modifier(Modifier::UNDERLINED)
-        } else {
-            state.theme.secondary
-        };
-        spans.push(Span::styled(format!("[{}]", tab.label()), style));
-    }
-    Line::from(spans)
 }
 
 fn draw_info(f: &mut Frame, state: &mut AppState, area: Rect) {
@@ -267,48 +224,6 @@ fn draw_info(f: &mut Frame, state: &mut AppState, area: Rect) {
         ));
     }
 
-    render_scrollable_lines(f, state, area, lines);
-}
-
-fn draw_local(f: &mut Frame, state: &mut AppState, area: Rect) {
-    let mut lines = Vec::new();
-    if let Some(local) = state.selected_site().and_then(|s| s.local.as_ref()) {
-        lines.push(kv(state, "path", &local.path.display().to_string()));
-        if let Some(name) = &local.lando_name {
-            lines.push(kv(state, "app", name));
-        }
-        if let Some(recipe) = &local.recipe {
-            lines.push(kv(state, "recipe", recipe));
-        }
-        let running = match local.running {
-            Some(true) => "running",
-            Some(false) => "stopped",
-            None => "unknown",
-        };
-        lines.push(kv(state, "status", running));
-        if let Some(url) = &local.url {
-            lines.push(kv(state, "url", url));
-        }
-        let pantheon = local
-            .recipe
-            .as_deref()
-            .is_some_and(|r| r.eq_ignore_ascii_case("pantheon"));
-        if local.recipe.is_some() && !pantheon {
-            lines.push(Line::from(Span::styled(
-                "recipe is not pantheon — pull/push hidden",
-                state.theme.warning_style,
-            )));
-        }
-        lines.push(Line::from(Span::styled(
-            "s start  S stop  · pull/push/rebuild in Actions",
-            state.theme.secondary,
-        )));
-    } else {
-        lines.push(Line::from(Span::styled(
-            "no local path bound  · --root <path> to bind",
-            state.theme.secondary,
-        )));
-    }
     render_scrollable_lines(f, state, area, lines);
 }
 

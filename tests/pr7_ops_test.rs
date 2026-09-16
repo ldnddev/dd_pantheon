@@ -55,15 +55,9 @@ fn demo_c_stages_clear_cache_preview_c_is_noop() {
 #[test]
 fn demo_wake_from_actions() {
     let (mut app, root) = demo_app();
-    let idx = app
-        .state
-        .actions
-        .iter()
-        .position(|a| a.id == "wake")
-        .expect("wake action");
-    app.state.action_state.select(Some(idx));
-    app.state.focus = FocusPane::Inspector;
-    app.handle_key(key(KeyCode::Enter)).unwrap();
+    assert!(app.state.actions.iter().any(|a| a.id == "wake"));
+    dd_pantheon::workflows::stage_action(&mut app.state, "wake");
+    dd_pantheon::workflows::request_run(&mut app.state);
     let plan = match app.state.current.as_ref() {
         Some(StagedPlan::One(p)) => p,
         other => panic!("expected wake plan, got {other:?}"),

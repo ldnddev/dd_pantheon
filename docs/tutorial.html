@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>dd_pantheon tutorial — setup and daily use</title>
-  <meta name="description" content="Install dd_pantheon, run the --demo layout lab, log in with a machine token, and run Terminus and Lando from a preview-first cockpit.">
+  <meta name="description" content="Install dd_pantheon, run the --demo cockpit, log in with a machine token, and run Terminus and Lando from a preview-first TUI.">
   <style>
     :root {
       --bg: #0f1114;
@@ -198,8 +198,8 @@ curl -fsSL https://raw.githubusercontent.com/ldnddev/dd_pantheon/main/install.sh
 ./install.sh uninstall</code></pre>
       <p>
         Uninstall removes the binary and the default theme file. It does
-        <em>not</em> delete <code>~/.config/ldnddev/dd_pantheon/</code> (layout,
-        history, sites overlay). If <code>~/.local/bin</code> is missing from
+        <em>not</em> delete <code>~/.config/ldnddev/dd_pantheon/</code>
+        (history, sites overlay). If <code>~/.local/bin</code> is missing from
         <code>PATH</code>, the script prints the export line to add.
       </p>
       <p>From a clone without installing (dev loop):</p>
@@ -208,8 +208,8 @@ cargo run
 cargo run -- --root /path/to/site</code></pre>
       <p>
         Missing Terminus is not fatal: the app still starts, the tree is empty,
-        login is disabled, and <kbd>F4</kbd> still cycles layouts. Same idea if
-        Lando or Git is missing — those workflows hide or skip.
+        and login is disabled. Same idea if Lando or Git is missing — those
+        workflows hide or skip.
       </p>
 
       <h2 id="demo">First run: <code>--demo</code></h2>
@@ -221,14 +221,10 @@ cargo run -- --root /path/to/site</code></pre>
       <figure>
         <img src="images/demo-cockpit.png" width="1264" height="712" alt="dd_pantheon demo cockpit. Header shows DEMO. Site tree on the left with acme-wp.test selected. Inspector shows WordPress tags, a cache gauge at 93 percent, and an actions list. Preview shows terminus backup:create acme-wp.test --element=all --yes. Job log has dummy backup lines.">
         <figcaption>
-          Classic stack in <code>--demo</code>: tree, inspector, always-on preview, job log.
+          Classic layout in <code>--demo</code>: tree, inspector, always-on preview, job log.
           The <code>DEMO</code> badge uses the warning color on purpose.
         </figcaption>
       </figure>
-      <p>
-        Use <kbd>F4</kbd> to try the other two body layouts (three-column, tabbed inspector).
-        The choice is saved in config. Default is this classic stack.
-      </p>
       <p>
         Screenshots on this page are captured from that demo app. After a UI
         change, refresh them (see <a href="#shots">Refresh these screenshots</a>).
@@ -241,7 +237,7 @@ cargo run -- --root /path/to/site</code></pre>
         Quit is <kbd>Ctrl+Q</kbd> even inside a text field. Bare <kbd>q</kbd> does not quit.
       </p>
       <figure>
-        <img src="images/demo-help.png" width="1264" height="712" alt="F1 Help modal listing global keys: F1 Help, F2 Theme, F3 Doctor, F4 cycle layout, Ctrl+Q quit, colon for palette, Ctrl+L login, and tree keys including backup, deploy, and CMS.">
+        <img src="images/demo-help.png" width="1264" height="712" alt="F1 Help modal listing global keys: F1 Help, F2 Theme, F3 Doctor, Ctrl+Q quit, colon for palette, Ctrl+L login, and tree keys including backup, deploy, and CMS.">
         <figcaption><kbd>F1</kbd> is the in-app cheat sheet. This HTML page does not try to replace it.</figcaption>
       </figure>
       <ul class="keys">

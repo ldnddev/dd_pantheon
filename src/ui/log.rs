@@ -1,4 +1,5 @@
 use crate::state::{AppState, FocusPane};
+use crate::ui::loader;
 use crate::ui::pane_block;
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -20,37 +21,33 @@ fn draw_inner(f: &mut Frame, state: &AppState, area: Rect, expanded: bool) {
         return;
     }
     let focused = expanded || state.focus == FocusPane::Log;
-    if !expanded && state.log_collapsed() {
-        let p = Paragraph::new(Line::from(Span::styled(
-            "Job log — idle",
-            state.theme.secondary,
-        )))
-        .style(state.theme.app_shell);
-        f.render_widget(p, area);
-        return;
-    }
 
-    let status = if state.job_running {
-        "RUNNING"
-    } else {
-        state.connection_status()
-    };
     let mut title_spans = vec![Span::raw("Job log activity")];
     if expanded {
         title_spans.push(Span::styled("  Esc close", state.theme.secondary));
     } else if focused {
         title_spans.push(Span::styled("  Enter expand", state.theme.info));
     }
-    if state.job_running {
+    let loader_frame = loader::current(state);
+    if let Some(frame) = loader_frame {
+        title_spans.push(Span::styled(
+            format!("  {frame}"),
+            state.theme.warning_style,
+        ));
         title_spans.push(Span::styled("  Ctrl+C cancel", state.theme.warning_style));
     }
     let title = Line::from(title_spans);
+    let status = loader_frame.unwrap_or_else(|| state.connection_status());
     let meta = Line::from(format!(
         "STATUS: {status}   SESSION: {}",
         state.session_started
     ))
     .right_aligned()
-    .style(state.theme.secondary);
+    .style(if state.job_running {
+        state.theme.warning_style
+    } else {
+        state.theme.secondary
+    });
     let text = if state.log_lines.is_empty() {
         "no output".to_string()
     } else {

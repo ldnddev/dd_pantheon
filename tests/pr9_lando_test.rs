@@ -49,15 +49,8 @@ fn demo_push_is_code_only() {
         app.state.actions.iter().any(|a| a.id == "lando-push"),
         "pantheon recipe should expose push"
     );
-    let idx = app
-        .state
-        .actions
-        .iter()
-        .position(|a| a.id == "lando-push")
-        .unwrap();
-    app.state.action_state.select(Some(idx));
-    app.state.focus = dd_pantheon::state::FocusPane::Inspector;
-    app.handle_key(key(KeyCode::Enter)).unwrap();
+    dd_pantheon::workflows::stage_action(&mut app.state, "lando-push");
+    dd_pantheon::workflows::request_run(&mut app.state);
     let plan = match app.state.current.as_ref() {
         Some(StagedPlan::One(p)) => p,
         other => panic!("expected push plan, got {other:?}"),
@@ -72,15 +65,9 @@ fn demo_push_is_code_only() {
 fn push_db_opens_livegate_database() {
     let (mut app, root) = demo_app();
     app.state.demo = false;
-    let idx = app
-        .state
-        .actions
-        .iter()
-        .position(|a| a.id == "lando-push-db")
-        .expect("push db action");
-    app.state.action_state.select(Some(idx));
-    app.state.focus = dd_pantheon::state::FocusPane::Inspector;
-    app.handle_key(key(KeyCode::Enter)).unwrap();
+    assert!(app.state.actions.iter().any(|a| a.id == "lando-push-db"));
+    dd_pantheon::workflows::stage_action(&mut app.state, "lando-push-db");
+    dd_pantheon::workflows::request_run(&mut app.state);
     match app.state.modal {
         Some(Modal::LiveGate { ref expected, .. }) => assert_eq!(expected, "database"),
         other => panic!("expected LiveGate database, got {other:?}"),
@@ -92,15 +79,9 @@ fn push_db_opens_livegate_database() {
 fn rebuild_opens_destructive_modal() {
     let (mut app, root) = demo_app();
     app.state.demo = false;
-    let idx = app
-        .state
-        .actions
-        .iter()
-        .position(|a| a.id == "lando-rebuild")
-        .expect("rebuild");
-    app.state.action_state.select(Some(idx));
-    app.state.focus = dd_pantheon::state::FocusPane::Inspector;
-    app.handle_key(key(KeyCode::Enter)).unwrap();
+    assert!(app.state.actions.iter().any(|a| a.id == "lando-rebuild"));
+    dd_pantheon::workflows::stage_action(&mut app.state, "lando-rebuild");
+    dd_pantheon::workflows::request_run(&mut app.state);
     assert!(
         matches!(app.state.modal, Some(Modal::ConfirmDestructive { .. })),
         "{:?}",

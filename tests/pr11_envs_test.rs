@@ -2,7 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use dd_pantheon::app::App;
 use dd_pantheon::models::SiteOverlay;
 use dd_pantheon::plan::{SafetyTier, StagedPlan};
-use dd_pantheon::state::{FocusPane, Modal, TreeSel};
+use dd_pantheon::state::{Modal, TreeSel};
 use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -27,14 +27,9 @@ fn demo_app() -> (App, PathBuf) {
 }
 
 fn pick_action(app: &mut App, id: &str) {
-    let idx = app
-        .state
-        .actions
-        .iter()
-        .position(|a| a.id == id)
-        .unwrap_or_else(|| panic!("missing action {id}"));
-    app.state.action_state.select(Some(idx));
-    app.state.focus = FocusPane::Inspector;
+    let found = app.state.actions.iter().any(|a| a.id == id);
+    assert!(found, "missing action {id}");
+    dd_pantheon::workflows::stage_action(&mut app.state, id);
 }
 
 #[test]
@@ -55,7 +50,7 @@ fn wipe_test_is_backup_first_destructive() {
     let (mut app, root) = demo_app();
     app.state.demo = false;
     pick_action(&mut app, "wipe");
-    app.handle_key(key(KeyCode::Enter)).unwrap();
+    dd_pantheon::workflows::request_run(&mut app.state);
     match app.state.current.as_ref() {
         Some(StagedPlan::Workflow { plan, .. }) => {
             assert_eq!(plan.steps[0].argv[0], "backup:create");
@@ -81,7 +76,7 @@ fn wipe_live_opens_livegate() {
     };
     force_actions(&mut app);
     pick_action(&mut app, "wipe");
-    app.handle_key(key(KeyCode::Enter)).unwrap();
+    dd_pantheon::workflows::request_run(&mut app.state);
     match app.state.modal {
         Some(Modal::LiveGate { ref expected, .. }) => assert_eq!(expected, "live"),
         other => panic!("expected LiveGate, got {other:?}"),
@@ -93,7 +88,6 @@ fn wipe_live_opens_livegate() {
 fn clone_opens_form_default_origin_live() {
     let (mut app, root) = demo_app();
     pick_action(&mut app, "clone-content");
-    app.handle_key(key(KeyCode::Enter)).unwrap();
     match &app.state.modal {
         Some(Modal::CloneContent {
             target,
@@ -144,7 +138,6 @@ fn multidev_create_modal_and_merge_on_feat_x() {
     let (mut app, root) = demo_app();
     assert!(app.state.actions.iter().any(|a| a.id == "multidev-create"));
     pick_action(&mut app, "multidev-create");
-    app.handle_key(key(KeyCode::Enter)).unwrap();
     assert!(matches!(
         app.state.modal,
         Some(Modal::MultidevCreate { .. })

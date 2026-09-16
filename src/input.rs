@@ -1,4 +1,3 @@
-use crate::models::InspectorTab;
 use crate::state::{AppState, CmsFocus, CreateField, FocusPane, Modal, PaletteForm, PreviewButton};
 use crate::toast::ToastLevel;
 use anyhow::Result;
@@ -53,10 +52,6 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
             KeyCode::F(3) => {
                 crate::workflows::start_doctor_jobs(state);
                 state.modal = Some(Modal::Doctor { scroll: 0 });
-                return Ok(false);
-            }
-            KeyCode::F(4) => {
-                state.cycle_layout();
                 return Ok(false);
             }
             _ => {}
@@ -1310,53 +1305,19 @@ fn handle_tree(state: &mut AppState, key: KeyEvent) -> Result<bool> {
 fn handle_inspector(state: &mut AppState, key: KeyEvent) -> Result<bool> {
     match key.code {
         KeyCode::Char('j') | KeyCode::Down => {
-            if state.layout == crate::models::LayoutId::TabbedInspector
-                && state.inspector_tab == InspectorTab::Actions
-            {
-                state.move_actions(1);
-            } else if state.layout == crate::models::LayoutId::TabbedInspector
-                && state.inspector_tab != InspectorTab::Actions
-            {
-                state.inspector_scroll = state.inspector_scroll.saturating_add(1);
-            } else {
-                state.inspector_scroll = state.inspector_scroll.saturating_add(1);
-            }
+            state.inspector_scroll = state.inspector_scroll.saturating_add(1);
         }
         KeyCode::Char('k') | KeyCode::Up => {
-            if state.layout == crate::models::LayoutId::TabbedInspector
-                && state.inspector_tab == InspectorTab::Actions
-            {
-                state.move_actions(-1);
-            } else {
-                state.inspector_scroll = state.inspector_scroll.saturating_sub(1);
-            }
+            state.inspector_scroll = state.inspector_scroll.saturating_sub(1);
         }
         KeyCode::Enter => {
-            if let Some(id) = state.selected_action_id() {
-                if crate::workflows::stage_action(state, id) {
-                    crate::workflows::request_run(state);
-                }
-            } else {
-                crate::workflows::request_run(state);
-            }
+            crate::workflows::request_run(state);
         }
-        KeyCode::Char('1') => state.inspector_tab = InspectorTab::Info,
-        KeyCode::Char('2') => state.inspector_tab = InspectorTab::Metrics,
-        KeyCode::Char('3') => state.inspector_tab = InspectorTab::Local,
-        KeyCode::Char('4') => state.inspector_tab = InspectorTab::Actions,
         KeyCode::Char('h') | KeyCode::Left => {
-            if state.layout == crate::models::LayoutId::TabbedInspector {
-                state.inspector_tab = state.inspector_tab.prev();
-            } else {
-                crate::workflows::tags::cycle_chip(state, -1);
-            }
+            crate::workflows::tags::cycle_chip(state, -1);
         }
         KeyCode::Char('l') | KeyCode::Right => {
-            if state.layout == crate::models::LayoutId::TabbedInspector {
-                state.inspector_tab = state.inspector_tab.next();
-            } else {
-                crate::workflows::tags::cycle_chip(state, 1);
-            }
+            crate::workflows::tags::cycle_chip(state, 1);
         }
         KeyCode::Char('[') => crate::workflows::tags::cycle_chip(state, -1),
         KeyCode::Char(']') => crate::workflows::tags::cycle_chip(state, 1),

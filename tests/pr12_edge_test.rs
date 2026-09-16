@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use dd_pantheon::app::App;
 use dd_pantheon::plan::{SafetyTier, StagedPlan};
-use dd_pantheon::state::{FocusPane, Modal};
+use dd_pantheon::state::Modal;
 use dd_pantheon::workflows::domains;
 use std::fs;
 use std::path::PathBuf;
@@ -28,14 +28,9 @@ fn demo_app() -> (App, PathBuf) {
 
 fn pick_action(app: &mut App, id: &str) {
     dd_pantheon::workflows::local::refresh_actions(&mut app.state);
-    let idx = app
-        .state
-        .actions
-        .iter()
-        .position(|a| a.id == id)
-        .unwrap_or_else(|| panic!("missing action {id}"));
-    app.state.action_state.select(Some(idx));
-    app.state.focus = FocusPane::Inspector;
+    let found = app.state.actions.iter().any(|a| a.id == id);
+    assert!(found, "missing action {id}");
+    dd_pantheon::workflows::stage_action(&mut app.state, id);
 }
 
 #[test]
@@ -53,7 +48,6 @@ fn demo_inspector_shows_domains_without_lock_password() {
 fn add_domain_opens_modal_and_stages() {
     let (mut app, root) = demo_app();
     pick_action(&mut app, "domain-add");
-    app.handle_key(key(KeyCode::Enter)).unwrap();
     assert!(matches!(app.state.modal, Some(Modal::DomainAdd { .. })));
     for c in "new.example.com".chars() {
         app.handle_key(key(KeyCode::Char(c))).unwrap();
@@ -73,7 +67,6 @@ fn add_domain_opens_modal_and_stages() {
 fn remove_domain_is_destructive() {
     let (mut app, root) = demo_app();
     pick_action(&mut app, "domain-remove");
-    app.handle_key(key(KeyCode::Enter)).unwrap();
     match &app.state.modal {
         Some(Modal::DomainRemove { domains, .. }) => {
             assert!(domains.iter().any(|d| d == "staging.example.com"));
@@ -99,7 +92,6 @@ fn remove_domain_is_destructive() {
 fn lock_enable_redacts_password_in_preview() {
     let (mut app, root) = demo_app();
     pick_action(&mut app, "lock-enable");
-    app.handle_key(key(KeyCode::Enter)).unwrap();
     for c in "ops".chars() {
         app.handle_key(key(KeyCode::Char(c))).unwrap();
     }

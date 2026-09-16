@@ -19,7 +19,7 @@
 #   PREFIX=$HOME/.local            # binary at $PREFIX/bin/dd_pantheon
 #   BINDIR=/path/to/bin            # wins over PREFIX
 #   XDG_CONFIG_HOME=$HOME/.config  # theme at …/ldnddev/dd_pantheon_theme.yml
-#   VERSION=latest                 # or v0.2.2 / 0.2.2
+#   VERSION=latest                 # or v0.2.3 / 0.2.3
 #   DD_PANTHEON_REPO=ldnddev/dd_pantheon
 #   GITHUB_TOKEN=…                 # optional; raises GitHub API rate limits
 #
@@ -265,7 +265,7 @@ if [ "$UNINSTALL" -eq 1 ]; then
   else
     info "theme not found at ${THEME_TARGET}"
   fi
-  info "left ${APP_CONFIG_DIR} in place (layout, history, sites overlay)"
+  info "left ${APP_CONFIG_DIR} in place (history, sites overlay)"
   info "done"
   exit 0
 fi

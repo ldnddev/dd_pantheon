@@ -13,7 +13,7 @@ dd_pantheon
 dd_pantheon --root ~/sites/acme-wp
 ```
 
-Pin a version with `VERSION=v0.2.2`. Uninstall:
+Pin a version with `VERSION=v0.2.3`. Uninstall:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ldnddev/dd_pantheon/main/install.sh | bash -s -- uninstall
@@ -32,7 +32,7 @@ it uses the same GitHub package as curl:
 From a clone without installing:
 
 ```sh
-cargo run -- --demo          # layout lab, dummy sites, no spawn
+cargo run -- --demo          # dummy sites, no spawn
 cargo run                    # live Terminus session
 cargo run -- --root ~/sites/acme-wp
 ```

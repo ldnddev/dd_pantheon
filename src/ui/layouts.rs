@@ -1,4 +1,3 @@
-use crate::models::LayoutId;
 use crate::state::AppState;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
@@ -10,14 +9,11 @@ pub struct PaneRects {
     pub log: Rect,
 }
 
-pub fn split(layout: LayoutId, body: Rect, state: &AppState) -> PaneRects {
+pub fn split(body: Rect, state: &AppState) -> PaneRects {
     if body.width < 80 {
-        return split_narrow(body, state);
-    }
-    match layout {
-        LayoutId::ClassicStack => split_a(body),
-        LayoutId::ThreeColumn => split_b(body),
-        LayoutId::TabbedInspector => split_c(body, state),
+        split_narrow(body, state)
+    } else {
+        split_classic(body)
     }
 }
 
@@ -27,7 +23,7 @@ fn classic_log_height(body_h: u16) -> u16 {
     (body_h / 3).clamp(6, 16).min(budget).max(4)
 }
 
-fn split_a(body: Rect) -> PaneRects {
+fn split_classic(body: Rect) -> PaneRects {
     // Sites tree on the left spanning inspector + command preview;
     // job log is full width underneath.
     let log_h = classic_log_height(body.height).min(body.height.saturating_sub(12));
@@ -54,53 +50,6 @@ fn split_a(body: Rect) -> PaneRects {
         inspector: right[0],
         preview: right[1],
         log: rows[1],
-    }
-}
-
-fn split_b(body: Rect) -> PaneRects {
-    let cols = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Ratio(1, 4),
-            Constraint::Ratio(2, 4),
-            Constraint::Ratio(1, 4),
-        ])
-        .split(body);
-    let right = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(8), Constraint::Min(3)])
-        .split(cols[2]);
-    PaneRects {
-        tree: cols[0],
-        inspector: cols[1],
-        preview: right[0],
-        log: right[1],
-    }
-}
-
-fn split_c(body: Rect, state: &AppState) -> PaneRects {
-    let log_h = if state.log_collapsed() {
-        1
-    } else {
-        8.min(body.height.saturating_sub(10)).max(3)
-    };
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(6),
-            Constraint::Length(5),
-            Constraint::Length(log_h),
-        ])
-        .split(body);
-    let top = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Ratio(2, 5), Constraint::Ratio(3, 5)])
-        .split(rows[0]);
-    PaneRects {
-        tree: top[0],
-        inspector: top[1],
-        preview: rows[1],
-        log: rows[2],
     }
 }
 
@@ -162,7 +111,7 @@ mod tests {
     #[test]
     fn classic_keeps_preview_and_log() {
         let state = demo_state();
-        let panes = split(LayoutId::ClassicStack, Rect::new(0, 0, 120, 40), &state);
+        let panes = split(Rect::new(0, 0, 120, 40), &state);
         assert!(panes.preview.height >= 5);
         assert!(panes.log.height >= 10);
         assert!(panes.tree.width >= 24);
@@ -171,7 +120,7 @@ mod tests {
     #[test]
     fn classic_tree_spans_inspector_and_preview() {
         let state = demo_state();
-        let panes = split(LayoutId::ClassicStack, Rect::new(0, 0, 120, 40), &state);
+        let panes = split(Rect::new(0, 0, 120, 40), &state);
         assert_eq!(panes.tree.y, panes.inspector.y);
         assert_eq!(panes.preview.x, panes.inspector.x);
         assert!(panes.preview.y >= panes.inspector.y + panes.inspector.height);
@@ -184,19 +133,9 @@ mod tests {
     }
 
     #[test]
-    fn tabbed_idle_log_is_stub() {
-        let mut state = demo_state();
-        state.layout = LayoutId::TabbedInspector;
-        state.focus = crate::state::FocusPane::Tree;
-        assert!(state.log_collapsed());
-        let panes = split(LayoutId::TabbedInspector, Rect::new(0, 0, 120, 40), &state);
-        assert_eq!(panes.log.height, 1);
-    }
-
-    #[test]
     fn narrow_stacks_vertically() {
         let state = demo_state();
-        let panes = split(LayoutId::ThreeColumn, Rect::new(0, 0, 70, 30), &state);
+        let panes = split(Rect::new(0, 0, 70, 30), &state);
         assert_eq!(panes.tree.x, panes.inspector.x);
         assert!(panes.tree.y < panes.inspector.y);
         assert!(panes.preview.height >= 3);
