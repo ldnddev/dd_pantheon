@@ -3,6 +3,7 @@ use crate::toast::ToastLevel;
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
+use std::path::PathBuf;
 
 pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
     if key.kind != crossterm::event::KeyEventKind::Press
@@ -45,8 +46,11 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
                 state.modal = Some(Modal::Help { scroll: 0 });
                 return Ok(false);
             }
-            KeyCode::F(2) => {
-                state.modal = Some(Modal::Theme { scroll: 0 });
+            KeyCode::F(2) if !matches!(state.modal, Some(Modal::ThemeEditor(_))) => {
+                state.modal = Some(Modal::ThemeEditor(ldnddev_theme::ThemeEditor::new(
+                    crate::theme::palette_from_theme(&state.theme),
+                    crate::theme::extra_theme_fields(),
+                )));
                 return Ok(false);
             }
             KeyCode::F(3) => {
@@ -264,20 +268,9 @@ fn handle_modal(state: &mut AppState, key: KeyEvent, modal: Modal) -> Result<boo
             }
             _ => {}
         },
-        Modal::Theme { scroll } => match key.code {
-            KeyCode::Esc | KeyCode::Char('q') | KeyCode::F(2) => state.modal = None,
-            KeyCode::Char('j') | KeyCode::Down => {
-                state.modal = Some(Modal::Theme {
-                    scroll: scroll.saturating_add(1),
-                });
-            }
-            KeyCode::Char('k') | KeyCode::Up => {
-                state.modal = Some(Modal::Theme {
-                    scroll: scroll.saturating_sub(1),
-                });
-            }
-            _ => {}
-        },
+        Modal::ThemeEditor(_) => {
+            handle_theme_editor(state, key);
+        }
         Modal::Doctor { scroll } => match key.code {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::F(3) => state.modal = None,
             KeyCode::Char('j') | KeyCode::Down => {
@@ -1485,9 +1478,7 @@ pub fn handle_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
                     scroll_log(state, if down { 1 } else { -1 });
                 } else {
                     match &mut state.modal {
-                        Some(Modal::Help { scroll })
-                        | Some(Modal::Theme { scroll })
-                        | Some(Modal::Doctor { scroll }) => {
+                        Some(Modal::Help { scroll }) | Some(Modal::Doctor { scroll }) => {
                             if down {
                                 *scroll = scroll.saturating_add(1);
                             } else {
@@ -1616,4 +1607,92 @@ fn row_at(area: Rect, y: u16, len: usize) -> Option<usize> {
     let inner_y = y.saturating_sub(area.y.saturating_add(1));
     let idx = inner_y as usize;
     if idx < len { Some(idx) } else { None }
+}
+
+fn handle_theme_editor(state: &mut AppState, key: KeyEvent) {
+    let Some(ek) = map_editor_key(key) else {
+        if key.code == KeyCode::F(2) {
+            if let Some(Modal::ThemeEditor(editor)) = &mut state.modal {
+                editor.revert();
+                state.theme = crate::theme::theme_from_palette(editor.palette.clone());
+            }
+            state.modal = None;
+        }
+        return;
+    };
+    let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+    let outcome = {
+        let Some(Modal::ThemeEditor(editor)) = &mut state.modal else {
+            return;
+        };
+        editor.handle(ek, shift)
+    };
+    match outcome {
+        ldnddev_theme::EditorOutcome::PaletteChanged => {
+            if let Some(Modal::ThemeEditor(editor)) = &state.modal {
+                state.theme = crate::theme::theme_from_palette(editor.palette.clone());
+            }
+        }
+        ldnddev_theme::EditorOutcome::RequestSave => {
+            if let Err(err) = save_theme_editor(state) {
+                state.show_toast(ToastLevel::Error, format!("Save failed: {err}"));
+            }
+        }
+        ldnddev_theme::EditorOutcome::Closed { .. } => {
+            if let Some(Modal::ThemeEditor(editor)) = &state.modal {
+                state.theme = crate::theme::theme_from_palette(editor.palette.clone());
+            }
+            state.modal = None;
+        }
+        ldnddev_theme::EditorOutcome::HexError(err) => {
+            state.show_toast(ToastLevel::Error, format!("Invalid hex: {err}"));
+        }
+        ldnddev_theme::EditorOutcome::None => {}
+    }
+}
+
+fn map_editor_key(key: KeyEvent) -> Option<ldnddev_theme::EditorKey> {
+    Some(match key.code {
+        KeyCode::Up => ldnddev_theme::EditorKey::Up,
+        KeyCode::Down => ldnddev_theme::EditorKey::Down,
+        KeyCode::Left => ldnddev_theme::EditorKey::Left,
+        KeyCode::Right => ldnddev_theme::EditorKey::Right,
+        KeyCode::Tab => ldnddev_theme::EditorKey::Tab,
+        KeyCode::Enter => ldnddev_theme::EditorKey::Enter,
+        KeyCode::Esc => ldnddev_theme::EditorKey::Esc,
+        KeyCode::Backspace => ldnddev_theme::EditorKey::Backspace,
+        KeyCode::Char(c) => ldnddev_theme::EditorKey::Char(c),
+        _ => return None,
+    })
+}
+
+fn save_theme_editor(state: &mut AppState) -> anyhow::Result<()> {
+    let Some(Modal::ThemeEditor(editor)) = &state.modal else {
+        return Ok(());
+    };
+    let target = editor.save_target;
+    let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let local = crate::theme::THEME_FILE_NAME;
+    let path = ldnddev_theme::save_theme(
+        &editor.palette,
+        &root,
+        local,
+        target,
+        ldnddev_theme::default_config_home().as_deref(),
+        &editor.fields,
+    )?;
+    let mut palette = editor.palette.clone();
+    palette.source = match target {
+        ldnddev_theme::ThemeSaveTarget::Local => ldnddev_theme::ThemeSource::Local,
+        ldnddev_theme::ThemeSaveTarget::Global => ldnddev_theme::ThemeSource::Global,
+    };
+    state.theme = crate::theme::theme_from_palette(palette);
+    state.theme_status =
+        crate::theme::ThemeStatus::healthy(state.theme.source, state.theme.version);
+    state.show_toast(
+        ToastLevel::Success,
+        format!("Saved {} theme to {}", target.label(), path.display()),
+    );
+    state.modal = None;
+    Ok(())
 }

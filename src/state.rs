@@ -59,9 +59,7 @@ pub enum Modal {
     Help {
         scroll: u16,
     },
-    Theme {
-        scroll: u16,
-    },
+    ThemeEditor(ldnddev_theme::ThemeEditor),
     Doctor {
         scroll: u16,
     },

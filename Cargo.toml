@@ -1,6 +1,6 @@
 [package]
 name = "dd_pantheon"
-version = "0.2.3"
+version = "0.3.0"
 edition = "2024"
 license = "MIT"
 description = "Guided operations cockpit for Pantheon sites (Terminus + Lando)"
@@ -23,3 +23,4 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 uuid = { version = "1", features = ["v4"] }
 which = "7"
+ldnddev_theme = { path = "crates/ldnddev_theme" }

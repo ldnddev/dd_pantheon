@@ -8,7 +8,7 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect, scroll: u16) {
     let mut lines: Vec<Line> = Vec::new();
     push_header(&mut lines, state, "Global");
     lines.push(line("F1", "Help"));
-    lines.push(line("F2", "Theme"));
+    lines.push(line("F2", "Theme editor (Tab local/global, Y save)"));
     lines.push(line("F3", "Doctor (refresh via job runner)"));
     lines.push(line("Ctrl+Q", "Quit"));
     lines.push(line("Tab / S-Tab", "Cycle panes"));

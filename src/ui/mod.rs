@@ -72,7 +72,7 @@ fn draw_modal(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     match state.modal.clone() {
         Some(Modal::Help { scroll }) => help::draw(f, state, modal_area, scroll),
-        Some(Modal::Theme { scroll }) => theme_modal::draw(f, state, modal_area, scroll),
+        Some(Modal::ThemeEditor(_)) => theme_modal::draw(f, state, modal_area),
         Some(Modal::Doctor { scroll }) => {
             let body = crate::doctor::render(
                 &state.tools,

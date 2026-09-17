@@ -447,3 +447,124 @@ pub fn global_theme_path() -> PathBuf {
         .join(".config/ldnddev")
         .join(THEME_FILE_NAME)
 }
+
+pub fn extra_theme_fields() -> &'static [ldnddev_theme::ColorField] {
+    &[
+        ldnddev_theme::EXTRA_MODAL_HEADER,
+        ldnddev_theme::EXTRA_TEXT_DISABLED,
+        ldnddev_theme::EXTRA_TEXT_INVERSE,
+    ]
+}
+
+pub fn color_from_rgb(rgb: ldnddev_theme::Rgb) -> Color {
+    Color::Rgb(rgb.r, rgb.g, rgb.b)
+}
+
+pub fn color_to_rgb(color: Color) -> ldnddev_theme::Rgb {
+    match color {
+        Color::Rgb(r, g, b) => ldnddev_theme::Rgb { r, g, b },
+        _ => ldnddev_theme::Rgb { r: 0, g: 0, b: 0 },
+    }
+}
+
+pub fn palette_from_theme(theme: &Theme) -> ldnddev_theme::Palette {
+    let mut palette = ldnddev_theme::Palette::builtin();
+    palette.header_quotes = theme.header_quotes.clone();
+    palette.source = match theme.source {
+        ThemeSource::Local => ldnddev_theme::ThemeSource::Local,
+        ThemeSource::Global => ldnddev_theme::ThemeSource::Global,
+        ThemeSource::Default => ldnddev_theme::ThemeSource::Default,
+    };
+    palette.version = theme.version;
+    let c = theme.colors;
+    let pairs = [
+        ("base_background", c.base_background),
+        ("body_background", c.body_background),
+        ("modal_background", c.modal_background),
+        ("text_primary", c.text_primary),
+        ("text_secondary", c.text_secondary),
+        ("text_labels", c.text_labels),
+        ("text_active_focus", c.text_active_focus),
+        ("modal_labels", c.modal_labels),
+        ("modal_text", c.modal_text),
+        ("modal_header", c.modal_header),
+        ("selected_background", c.selected_background),
+        ("border_default", c.border_default),
+        ("border_active", c.border_active),
+        ("scrollbar", c.scrollbar),
+        ("scrollbar_hover", c.scrollbar_hover),
+        ("input_border_default", c.input_border_default),
+        ("input_border_focus", c.input_border_focus),
+        ("input_text_default", c.input_text_default),
+        ("input_text_focus", c.input_text_focus),
+        ("cursor", c.cursor),
+        ("success", c.success),
+        ("warning", c.warning),
+        ("error", c.error),
+        ("info", c.info),
+        ("folders", c.folders),
+        ("files", c.files),
+        ("links", c.links),
+    ];
+    for (key, color) in pairs {
+        palette.set(key, color_to_rgb(color));
+    }
+    if let Some(color) = c.text_disabled {
+        palette.set("text_disabled", color_to_rgb(color));
+    }
+    if let Some(color) = c.text_inverse {
+        palette.set("text_inverse", color_to_rgb(color));
+    }
+    palette
+}
+
+pub fn theme_from_palette(palette: ldnddev_theme::Palette) -> Theme {
+    let get = |k: &str| palette.get(k).map(color_from_rgb).unwrap_or(Color::Reset);
+    let colors = ThemeColors {
+        base_background: get("base_background"),
+        body_background: get("body_background"),
+        modal_background: get("modal_background"),
+        text_primary: get("text_primary"),
+        text_secondary: get("text_secondary"),
+        text_labels: get("text_labels"),
+        text_active_focus: get("text_active_focus"),
+        modal_labels: get("modal_labels"),
+        modal_text: get("modal_text"),
+        modal_header: get("modal_header"),
+        selected_background: get("selected_background"),
+        border_default: get("border_default"),
+        border_active: get("border_active"),
+        scrollbar: get("scrollbar"),
+        scrollbar_hover: get("scrollbar_hover"),
+        input_border_default: get("input_border_default"),
+        input_border_focus: get("input_border_focus"),
+        input_text_default: get("input_text_default"),
+        input_text_focus: get("input_text_focus"),
+        cursor: get("cursor"),
+        success: get("success"),
+        warning: get("warning"),
+        error: get("error"),
+        info: get("info"),
+        folders: get("folders"),
+        files: get("files"),
+        links: get("links"),
+        text_disabled: palette.get("text_disabled").map(color_from_rgb),
+        text_inverse: palette.get("text_inverse").map(color_from_rgb),
+    };
+    let source = match palette.source {
+        ldnddev_theme::ThemeSource::Local => ThemeSource::Local,
+        ldnddev_theme::ThemeSource::Global => ThemeSource::Global,
+        ldnddev_theme::ThemeSource::Default => ThemeSource::Default,
+    };
+    let quotes = palette.header_quotes.clone();
+    let mut theme = Theme::from_colors(colors, source, palette.version);
+    theme.header_quotes = if quotes.is_empty() {
+        DEFAULT_HEADER_QUOTES
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect()
+    } else {
+        quotes
+    };
+    theme
+}
