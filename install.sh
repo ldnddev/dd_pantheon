@@ -19,7 +19,7 @@
 #   PREFIX=$HOME/.local            # binary at $PREFIX/bin/dd_pantheon
 #   BINDIR=/path/to/bin            # wins over PREFIX
 #   XDG_CONFIG_HOME=$HOME/.config  # theme at …/ldnddev/dd_pantheon_theme.yml
-#   VERSION=latest                 # or v0.3.0 / 0.3.0
+#   VERSION=latest                 # or v0.3.1 / 0.3.1
 #   DD_PANTHEON_REPO=ldnddev/dd_pantheon
 #   GITHUB_TOKEN=…                 # optional; raises GitHub API rate limits
 #

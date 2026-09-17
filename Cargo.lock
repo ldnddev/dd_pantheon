@@ -285,12 +285,13 @@ dependencies = [
 
 [[package]]
 name = "dd_pantheon"
-version = "0.2.3"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "chrono",
  "crossterm",
  "dirs",
+ "ldnddev_theme",
  "libc",
  "ratatui",
  "serde",
@@ -680,6 +681,15 @@ name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
+
+[[package]]
+name = "ldnddev_theme"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_yaml",
+]
 
 [[package]]
 name = "libc"
