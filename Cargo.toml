@@ -5,6 +5,10 @@ edition = "2024"
 license = "MIT"
 description = "Guided operations cockpit for Pantheon sites (Terminus + Lando)"
 
+[workspace]
+resolver = "3"
+members = ["crates/ldnddev_theme"]
+
 [dependencies]
 anyhow = "1"
 chrono = { version = "0.4", default-features = false, features = ["alloc", "clock", "std"] }

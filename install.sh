@@ -371,6 +371,7 @@ install_from_source() {
   fi
   cd "$root"
   [ -f Cargo.toml ] || fail "No Cargo.toml in $root"
+  [ -f "$root/crates/ldnddev_theme/Cargo.toml" ] || fail "missing in-tree crate $root/crates/ldnddev_theme (this repo does not use an external theme crate)"
   local theme_source="$root/$THEME_FILE_NAME"
   [ -f "$theme_source" ] || fail "theme file not found at $theme_source"
 
@@ -387,9 +388,9 @@ install_from_source() {
   if [ "$DO_BUILD" -eq 1 ]; then
     info "building ${APP_NAME} (${BUILD_PROFILE})"
     if [ "$BUILD_PROFILE" = "release" ]; then
-      cargo build --release
+      cargo build --release --locked -p dd_pantheon
     else
-      cargo build
+      cargo build --locked -p dd_pantheon
     fi
   fi
 

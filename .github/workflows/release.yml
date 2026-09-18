@@ -51,7 +51,7 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Build
-        run: cargo build --release --locked --target ${{ matrix.target }}
+        run: cargo build --release --locked --workspace --target ${{ matrix.target }} -p dd_pantheon
 
       - name: Package
         run: |
