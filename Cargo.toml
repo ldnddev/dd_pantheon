@@ -9,22 +9,29 @@ description = "Guided operations cockpit for Pantheon sites (Terminus + Lando)"
 resolver = "3"
 members = ["crates/ldnddev_theme"]
 
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+debug = false
+
 [dependencies]
 anyhow = "1"
 chrono = { version = "0.4", default-features = false, features = ["alloc", "clock", "std"] }
 crossterm = "0.29"
 dirs = "5"
 libc = "0.2"
-ratatui = "0.30"
+ratatui = { version = "0.30", default-features = false, features = ["crossterm"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["preserve_order"] }
+serde_json = "1"
 serde_yaml = "0.9"
 shlex = "1"
 thiserror = "2"
 toml = "0.8"
 unicode-width = "0.2"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-uuid = { version = "1", features = ["v4"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt", "std"] }
 which = "7"
 ldnddev_theme = { path = "crates/ldnddev_theme" }

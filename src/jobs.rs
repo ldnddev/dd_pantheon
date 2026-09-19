@@ -4,11 +4,10 @@ use std::collections::VecDeque;
 use std::io::Read;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError};
 use std::thread;
 use std::time::{Duration, Instant};
-use uuid::Uuid;
 
 pub const CHANNEL_CAP: usize = 256;
 pub const LOG_MAX_LINES: usize = 4000;
@@ -16,12 +15,14 @@ pub const LOG_MAX_BYTES: usize = 1024 * 1024;
 const CHUNK: usize = 4096;
 const KILL_GRACE: Duration = Duration::from_secs(2);
 
+static NEXT_JOB_ID: AtomicU64 = AtomicU64::new(1);
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct JobId(pub Uuid);
+pub struct JobId(pub u64);
 
 impl JobId {
     pub fn new() -> Self {
-        Self(Uuid::new_v4())
+        Self(NEXT_JOB_ID.fetch_add(1, Ordering::Relaxed))
     }
 }
 
