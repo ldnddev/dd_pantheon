@@ -1,6 +1,12 @@
 # Tutorial assets
 
-Operator guide: [tutorial.html](tutorial.html).
+Operator guide: [index.html](index.html) (GitHub Pages:
+https://ldnddev.github.io/dd_pantheon/). `tutorial.html` redirects there so
+older links still work.
+
+GitHub Pages publishes this folder from `main` via `.github/workflows/pages.yml`.
+`.nojekyll` is here so a branch `/docs` source would also serve the HTML as-is
+instead of running Jekyll.
 
 ## Refresh UI shots after a change
 
@@ -37,4 +43,4 @@ Do **not** commit `*.json` or `*.svg` — they are gitignored. Commit the PNGs.
 | `demo-livegate.png` | select live, `e`, Enter (demo flag off only so LiveGate opens; still fixtures) |
 
 If you add a screenshot, add a scene in `capture_demo.rs`, a row here, and a
-`<figure>` in `tutorial.html`.
+`<figure>` in `index.html`.

@@ -37,7 +37,7 @@ cargo run                    # live Terminus session
 cargo run -- --root ~/sites/acme-wp
 ```
 
-**Setup and daily use:** [docs/tutorial.html](docs/tutorial.html)
+**Setup and daily use:** [tutorial](https://ldnddev.github.io/dd_pantheon/)
 
 Quit is always `Ctrl+Q`. Bare `q` does not quit. Wipe has no `W` key.
 
