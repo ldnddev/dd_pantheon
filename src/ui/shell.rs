@@ -1,4 +1,4 @@
-use crate::state::AppState;
+use crate::state::{AppState, FocusPane, TreeSel};
 use crate::ui::loader;
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -17,43 +17,128 @@ pub fn draw_header(f: &mut Frame, state: &AppState, area: Rect) {
         .border_style(state.theme.active_border)
         .style(state.theme.app_shell);
     let inner = block.inner(area);
-    let header = Paragraph::new(state.header_copy.as_str()).block(block);
-    f.render_widget(header, area);
+    f.render_widget(Paragraph::new("").block(block), area);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+    let status = header_status(state);
+    let status_w = status.width() as u16;
+    let quote_budget = inner.width.saturating_sub(if status_w == 0 {
+        0
+    } else {
+        status_w.saturating_add(1)
+    }) as usize;
+    let quote = truncate_from_right(&state.header_copy, quote_budget);
+    f.render_widget(Paragraph::new(quote).style(state.theme.app_shell), inner);
+    if status_w > 0 && inner.width >= status_w {
+        let rect = Rect::new(
+            inner.x + inner.width.saturating_sub(status_w),
+            inner.y + inner.height.saturating_sub(1) / 2,
+            status_w,
+            1,
+        );
+        let style = if state.job_running {
+            state.theme.warning_style
+        } else {
+            state.theme.secondary
+        };
+        f.render_widget(
+            Paragraph::new(Span::styled(status, style)).style(state.theme.app_shell),
+            rect,
+        );
+    }
+}
+
+fn header_status(state: &AppState) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    match &state.selected {
+        TreeSel::Env { site, env } => parts.push(format!("{site}.{env}")),
+        TreeSel::Site(site) => parts.push(site.clone()),
+        TreeSel::None => {}
+    }
     if let Some(frame) = loader::current(state) {
-        let label = format!(" {frame} ");
-        let w = label.width() as u16;
-        if inner.width >= w && inner.height > 0 {
-            let rect = Rect::new(
-                inner.x + inner.width.saturating_sub(w),
-                inner.y + inner.height.saturating_sub(1) / 2,
-                w,
-                1,
-            );
-            f.render_widget(
-                Paragraph::new(Span::styled(label, state.theme.warning_style))
-                    .style(state.theme.app_shell),
-                rect,
-            );
-        }
+        parts.push(frame.to_string());
+    }
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!(" {} ", parts.join("  "))
     }
 }
 
 pub fn draw_footer(f: &mut Frame, state: &AppState, area: Rect) {
-    let keys = footer_keys(area.width);
+    let keys = footer_line(area.width, state);
     let bar = Paragraph::new(Line::from(keys)).style(state.theme.app_shell);
     f.render_widget(bar, area);
-    let _ = state;
 }
 
 pub fn footer_keys(width: u16) -> String {
+    footer_line_raw(width, FocusPane::Tree, false, false)
+}
+
+fn footer_line(width: u16, state: &AppState) -> String {
+    footer_line_raw(width, state.focus, state.modal.is_some(), state.job_running)
+}
+
+fn footer_line_raw(width: u16, focus: FocusPane, modal: bool, job_running: bool) -> String {
     let raw = if width < 80 {
-        "F1:Help  F2:Theme  C-q:Quit  /:Filter"
+        "F1:Help  F2:Theme  C-q:Quit  /:Filter".to_string()
     } else if width < 120 {
-        "F1: Help   F2: Theme   Ctrl+Q: Quit   j/k: Nav   Enter: Run   /: Filter   :: Pal"
+        format!(
+            "F1: Help   F2: Theme   Ctrl+Q: Quit   {}",
+            pane_hint_medium(focus, modal, job_running)
+        )
     } else {
-        "F1: Help   F2: Theme   Ctrl+Q: Quit   F3: Doctor   j/k: Nav   Tab: Pane   Enter: Run   /: Filter   :: Palette   r: Refresh   (mouse: click/scroll)"
+        format!(
+            "F1: Help   F2: Theme   Ctrl+Q: Quit   F3: Doctor   {}",
+            pane_hint_wide(focus, modal, job_running)
+        )
     };
-    truncate_from_right(raw, width as usize)
+    truncate_from_right(&raw, width as usize)
+}
+
+fn pane_hint_medium(focus: FocusPane, modal: bool, job_running: bool) -> String {
+    let body = if modal {
+        "Esc: Close   Enter: Confirm"
+    } else {
+        match focus {
+            FocusPane::Tree => "j/k: Nav   Enter: Run   /: Filter   :: Pal",
+            FocusPane::Inspector => "j/k: Scroll   Enter: Run   m: CMS",
+            FocusPane::Preview => "Enter: Process   y: Copy   Esc: Unstage",
+            FocusPane::Log => "j/k: Scroll   Enter: Expand   G: Follow",
+        }
+    };
+    if job_running {
+        format!("{body}   Ctrl+C: Cancel")
+    } else {
+        body.to_string()
+    }
+}
+
+fn pane_hint_wide(focus: FocusPane, modal: bool, job_running: bool) -> String {
+    let body = if modal {
+        "Esc: Close   Enter: Confirm   click outside to dismiss"
+    } else {
+        match focus {
+            FocusPane::Tree => {
+                "j/k: Nav   Tab: Pane   Enter: Run   /: Filter   :: Palette   r: Refresh   (mouse: click/scroll)"
+            }
+            FocusPane::Inspector => {
+                "j/k: Scroll   Enter: Run   m: CMS   [ ]: Tags   d/w/M: Period   (mouse: click/scroll)"
+            }
+            FocusPane::Preview => {
+                "Enter: Process   y: Copy   Esc: Unstage   click Process/Copy/Cancel"
+            }
+            FocusPane::Log => {
+                "j/k: Scroll   Enter: Expand   g/G: Top/Follow   PgUp/PgDn   (mouse: click/scroll)"
+            }
+        }
+    };
+    if job_running {
+        format!("{body}   Ctrl+C: Cancel")
+    } else {
+        body.to_string()
+    }
 }
 
 fn truncate_from_right(s: &str, max: usize) -> String {

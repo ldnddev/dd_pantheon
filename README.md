@@ -13,7 +13,7 @@ dd_pantheon
 dd_pantheon --root ~/sites/acme-wp
 ```
 
-Pin a version with `VERSION=v0.3.2`. Uninstall:
+Pin a version with `VERSION=v0.3.3`. Uninstall:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ldnddev/dd_pantheon/main/install.sh | bash -s -- uninstall

@@ -84,7 +84,7 @@ fn empty_tree_message(state: &AppState) -> &'static str {
             if state.inflight_readonly.contains_key("site:list") {
                 "loading sites…"
             } else {
-                "no sites"
+                "no sites — r to refresh, n to create"
             }
         }
     }

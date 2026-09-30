@@ -7,18 +7,22 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{
     Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
 };
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-pub fn draw(f: &mut Frame, state: &AppState, area: Rect) {
+pub fn draw(f: &mut Frame, state: &mut AppState, area: Rect) {
     draw_inner(f, state, area, false);
 }
 
-pub fn draw_expanded(f: &mut Frame, state: &AppState, area: Rect) {
+pub fn draw_expanded(f: &mut Frame, state: &mut AppState, area: Rect) {
     draw_inner(f, state, area, true);
 }
 
-fn draw_inner(f: &mut Frame, state: &AppState, area: Rect, expanded: bool) {
+fn draw_inner(f: &mut Frame, state: &mut AppState, area: Rect, expanded: bool) {
     if area.width == 0 || area.height == 0 {
         return;
+    }
+    if state.log_follow {
+        state.snap_log_follow();
     }
     let focused = expanded || state.focus == FocusPane::Log;
 
@@ -27,6 +31,9 @@ fn draw_inner(f: &mut Frame, state: &AppState, area: Rect, expanded: bool) {
         title_spans.push(Span::styled("  Esc close", state.theme.secondary));
     } else if focused {
         title_spans.push(Span::styled("  Enter expand", state.theme.info));
+    }
+    if !state.log_follow && !state.log_lines.is_empty() {
+        title_spans.push(Span::styled("  G follow", state.theme.secondary));
     }
     let loader_frame = loader::current(state);
     if let Some(frame) = loader_frame {
@@ -48,10 +55,22 @@ fn draw_inner(f: &mut Frame, state: &AppState, area: Rect, expanded: bool) {
     } else {
         state.theme.secondary
     });
+    let inner_w = area.width.saturating_sub(2) as usize;
+    let vis = area.height.saturating_sub(2).max(1) as usize;
+    let start = (state.log_scroll as usize).min(state.log_lines.len());
+    let end = (start + vis).min(state.log_lines.len());
     let text = if state.log_lines.is_empty() {
-        "no output".to_string()
+        if state.job_running {
+            "running… output appears here".to_string()
+        } else {
+            "jobs print here · Enter expands · G follows tail".to_string()
+        }
     } else {
-        state.log_lines.join("\n")
+        state.log_lines[start..end]
+            .iter()
+            .map(|line| truncate_line(line, inner_w))
+            .collect::<Vec<_>>()
+            .join("\n")
     };
     let block = if expanded {
         Block::default()
@@ -70,7 +89,6 @@ fn draw_inner(f: &mut Frame, state: &AppState, area: Rect, expanded: bool) {
             state.theme.body
         })
         .wrap(Wrap { trim: false })
-        .scroll((state.log_scroll, 0))
         .block(block);
     f.render_widget(p, area);
     if state.log_lines.len() as u16 + 2 > area.height {
@@ -82,4 +100,19 @@ fn draw_inner(f: &mut Frame, state: &AppState, area: Rect, expanded: bool) {
             &mut sb,
         );
     }
+}
+
+fn truncate_line(line: &str, width: usize) -> &str {
+    if width == 0 || line.width() <= width {
+        return line;
+    }
+    let mut cols = 0;
+    for (i, ch) in line.char_indices() {
+        let w = ch.width().unwrap_or(0);
+        if cols + w > width {
+            return &line[..i];
+        }
+        cols += w;
+    }
+    line
 }

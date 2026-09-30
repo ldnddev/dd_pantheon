@@ -7,7 +7,7 @@ use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 pub fn draw(f: &mut Frame, state: &AppState, area: Rect, scroll: u16) {
     let mut lines: Vec<Line> = Vec::new();
     push_header(&mut lines, state, "Global");
-    lines.push(line("F1", "Help"));
+    lines.push(line("F1 / ?", "Help"));
     lines.push(line("F2", "Theme editor (Tab local/global, Y save)"));
     lines.push(line("F3", "Doctor (refresh via job runner)"));
     lines.push(line("Ctrl+Q", "Quit"));
@@ -28,8 +28,9 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect, scroll: u16) {
 
     push_header(&mut lines, state, "Tree");
     lines.push(line("j/k ↑↓", "Move"));
+    lines.push(line("PgUp/PgDn", "Page"));
     lines.push(line("h/l", "Expand / collapse"));
-    lines.push(line("g / G", "Top / bottom"));
+    lines.push(line("g / G  Home/End", "Top / bottom"));
     lines.push(line("Enter", "Expand site / keep env selected"));
     lines.push(line("r", "Refresh inventory + metrics + backups (live)"));
     lines.push(line("b", "Stage backup:create (env row; Enter runs)"));
@@ -62,7 +63,8 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect, scroll: u16) {
     lines.push(line("[ / ]", "Cycle tag chips (inspector)"));
 
     push_header(&mut lines, state, "Inspector");
-    lines.push(line("j/k", "Scroll inspector"));
+    lines.push(line("j/k  PgUp/PgDn", "Scroll inspector"));
+    lines.push(line("g / G  Home/End", "Inspector top / bottom"));
     lines.push(line("Enter", "Run the staged plan (same as preview)"));
     lines.push(line(
         "d / w / Shift+M",
@@ -103,6 +105,10 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect, scroll: u16) {
         "Focus pane / select tree row / period labels",
     ));
     lines.push(line("wheel", "Scroll hovered pane"));
+    lines.push(line(
+        "click outside",
+        "Close Help, Doctor, Filter, Palette, log overlay",
+    ));
 
     let p = Paragraph::new(lines)
         .wrap(Wrap { trim: false })

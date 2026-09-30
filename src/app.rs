@@ -109,22 +109,113 @@ impl App {
         handle_mouse(&mut self.state, mouse)
     }
 
-    pub fn tick(&mut self) {
-        self.state.clear_expired_toast();
+    /// Drain jobs, timers, and toasts. Returns whether the UI should repaint.
+    pub fn tick(&mut self) -> bool {
+        let mut dirty = self.state.clear_expired_toast();
+
+        let warning_before = self.state.config.load_warning.clone();
         self.state.config.flush_if_due();
+        if self.state.config.load_warning != warning_before {
+            if let Some(warn) = self.state.config.load_warning.clone() {
+                self.state.show_toast(ToastLevel::Warning, warn);
+            }
+            dirty = true;
+        }
+
+        let mut got_job = false;
         for _ in 0..64 {
             match self.state.job_hub.rx.try_recv() {
-                Ok(ev) => apply_event(&mut self.state, ev),
+                Ok(ev) => {
+                    apply_event(&mut self.state, ev);
+                    got_job = true;
+                }
                 Err(_) => break,
             }
         }
-        self.state.job_running = self.state.jobs.values().any(|j| j.status.is_live());
+        if got_job {
+            dirty = true;
+        }
+
+        let running = self.state.jobs.values().any(|j| j.status.is_live());
+        if running != self.state.job_running {
+            self.state.job_running = running;
+            dirty = true;
+        }
+
+        let frame = crate::ui::loader::frame_index(&self.state);
+        if frame != self.state.loader_frame {
+            self.state.loader_frame = frame;
+            dirty = true;
+        }
+
+        let jobs_before = self.state.jobs.len();
         crate::workflows::inventory::flush_debounce(&mut self.state);
         crate::workflows::tags::flush_debounce(&mut self.state);
         crate::workflows::metrics::flush_debounce(&mut self.state);
         crate::workflows::backup::flush_debounce(&mut self.state);
         crate::workflows::local::flush_debounce(&mut self.state);
         crate::workflows::domains::flush_debounce(&mut self.state);
+        if self.state.jobs.len() != jobs_before {
+            self.state.job_running = self.state.jobs.values().any(|j| j.status.is_live());
+            dirty = true;
+        }
+
+        dirty
+    }
+
+    /// How long the event loop can sleep before a timer (toast, loader, debounce) is due.
+    /// `None` means block on input — nothing in the UI is animating.
+    pub fn next_poll_timeout(&self) -> Option<std::time::Duration> {
+        use std::time::{Duration, Instant};
+        let mut wait: Option<Duration> = None;
+        let push = |wait: &mut Option<Duration>, d: Duration| {
+            *wait = Some(wait.map_or(d, |w| w.min(d)));
+        };
+        let since = |at: Instant, debounce: Duration| debounce.saturating_sub(at.elapsed());
+
+        if self.state.job_running {
+            push(&mut wait, Duration::from_millis(50));
+            if let Some(rem) = crate::ui::loader::next_frame_in(&self.state) {
+                push(&mut wait, rem);
+            }
+        }
+        if let Some(toast) = &self.state.toast {
+            push(
+                &mut wait,
+                toast.duration.saturating_sub(toast.created_at.elapsed()),
+            );
+        }
+        if let Some((_, at)) = &self.state.pending_env_list {
+            push(&mut wait, since(*at, crate::workflows::inventory::DEBOUNCE));
+        }
+        if let Some((_, _, at)) = &self.state.pending_env_info {
+            push(&mut wait, since(*at, crate::workflows::inventory::DEBOUNCE));
+        }
+        if let Some((_, at)) = &self.state.pending_org_list {
+            push(&mut wait, since(*at, crate::workflows::tags::DEBOUNCE));
+        }
+        if let Some((_, _, at)) = &self.state.pending_tag_list {
+            push(&mut wait, since(*at, crate::workflows::tags::DEBOUNCE));
+        }
+        if let Some((_, _, at)) = &self.state.pending_metrics {
+            push(&mut wait, since(*at, crate::workflows::metrics::DEBOUNCE));
+        }
+        if let Some((_, _, at)) = &self.state.pending_backup_list {
+            push(&mut wait, since(*at, crate::workflows::backup::DEBOUNCE));
+        }
+        if let Some((_, _, at)) = &self.state.pending_edge {
+            push(&mut wait, since(*at, crate::workflows::domains::DEBOUNCE));
+        }
+        if let Some(at) = &self.state.pending_lando {
+            push(&mut wait, since(*at, crate::workflows::local::DEBOUNCE));
+        }
+        if let Some(at) = self.state.config.dirty_since {
+            push(&mut wait, since(at, crate::config::CONFIG_WRITE_DEBOUNCE));
+        }
+        if let Some(at) = self.state.config.sites_dirty_since {
+            push(&mut wait, since(at, crate::config::CONFIG_WRITE_DEBOUNCE));
+        }
+        wait
     }
 
     pub fn save(&mut self) -> Result<()> {
@@ -166,6 +257,7 @@ fn apply_event(state: &mut AppState, ev: JobEvent) {
                     let extra = state.log_lines.len() - 4000;
                     state.log_lines.drain(..extra);
                 }
+                state.snap_log_follow();
             }
         }
         JobEvent::Exited {
@@ -474,4 +566,66 @@ fn advance_workflow(state: &mut AppState) {
         *step = next;
     }
     workflows::start_job(state, next_plan, JobKind::Workflow { step: next, total });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn demo() -> App {
+        let dir = std::env::temp_dir().join(format!(
+            "dd_pantheon_tick_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let _ = std::fs::create_dir_all(&dir);
+        App::new_demo_in(&dir, &dir).expect("demo app")
+    }
+
+    fn idle(app: &mut App) {
+        app.state.toast = None;
+        app.state.config.dirty_since = None;
+        app.state.config.sites_dirty_since = None;
+        app.state.job_running = false;
+        app.state.loader_frame = None;
+    }
+
+    #[test]
+    fn idle_tick_is_clean_and_has_no_wake() {
+        let mut app = demo();
+        idle(&mut app);
+        let _ = app.tick();
+        idle(&mut app);
+        assert!(!app.tick(), "second idle tick must not request a redraw");
+        assert!(
+            app.next_poll_timeout().is_none(),
+            "idle cockpit blocks on input"
+        );
+    }
+
+    #[test]
+    fn expired_toast_dirties_and_clears() {
+        let mut app = demo();
+        idle(&mut app);
+        app.state.show_toast(ToastLevel::Info, "x");
+        if let Some(t) = app.state.toast.as_mut() {
+            t.duration = Duration::ZERO;
+        }
+        assert!(app.tick());
+        assert!(app.state.toast.is_none());
+    }
+
+    #[test]
+    fn toast_schedules_a_wake() {
+        let mut app = demo();
+        idle(&mut app);
+        app.state.show_toast(ToastLevel::Info, "x");
+        let wait = app.next_poll_timeout().expect("toast wake");
+        assert!(wait <= crate::toast::TOAST_DURATION);
+        assert!(wait > Duration::ZERO);
+    }
 }

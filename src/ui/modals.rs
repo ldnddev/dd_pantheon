@@ -39,7 +39,7 @@ pub fn draw_login(
         Line::from(""),
         Line::from(vec![
             Span::styled("token  ", theme.modal_label),
-            Span::styled(masked, theme.input_text_focus),
+            Span::styled(masked.clone(), theme.input_text_focus),
         ]),
     ];
     if env_available {
@@ -59,6 +59,24 @@ pub fn draw_login(
             .style(theme.modal),
     );
     f.render_widget(p, area);
+    if !use_env_token {
+        let inner = Block::default().borders(Borders::ALL).inner(area);
+        let prefix = 5u16; // "token  " after a few header lines — caret on the token row
+        let token_y = inner.y.saturating_add(5);
+        if inner.height > 5 {
+            crate::ui::place_cursor_in(
+                f,
+                Rect {
+                    x: inner.x.saturating_add(prefix),
+                    y: token_y,
+                    width: inner.width.saturating_sub(prefix),
+                    height: 1,
+                },
+                0,
+                &masked,
+            );
+        }
+    }
 }
 
 pub fn draw_destructive(f: &mut Frame, state: &AppState, area: Rect, plan: &CommandPlan) {
@@ -146,6 +164,8 @@ pub fn draw_livegate(
             ),
     );
     f.render_widget(input, chunks[1]);
+    let inner = Block::default().borders(Borders::ALL).inner(chunks[1]);
+    crate::ui::place_cursor_in(f, inner, 0, typed);
 }
 
 pub fn draw_diffstat_dirty(
@@ -194,16 +214,15 @@ pub fn draw_diffstat_dirty(
 }
 
 pub fn draw_tag_add(f: &mut Frame, theme: &Theme, area: Rect, value: &str) {
-    let p = Paragraph::new(format!("tag: {value}"))
-        .style(theme.input_text_focus)
-        .block(
-            Block::default()
-                .title("Add tag")
-                .borders(Borders::ALL)
-                .border_style(theme.input_border_focus)
-                .style(theme.modal),
-        );
-    f.render_widget(p, area);
+    let block = Block::default()
+        .title("Add tag")
+        .borders(Borders::ALL)
+        .border_style(theme.input_border_focus)
+        .style(theme.modal);
+    let inner = block.inner(area);
+    let p = Paragraph::new(format!("tag: {value}")).style(theme.input_text_focus);
+    f.render_widget(p.block(block), area);
+    crate::ui::place_cursor_in(f, inner, 5, value);
 }
 
 pub fn draw_org_picker(f: &mut Frame, theme: &Theme, area: Rect, orgs: &[OrgRef], selected: usize) {
@@ -357,6 +376,18 @@ pub fn draw_domain_add(f: &mut Frame, theme: &Theme, area: Rect, value: &str) {
             .style(theme.modal),
     );
     f.render_widget(p, area);
+    let inner = Block::default().borders(Borders::ALL).inner(area);
+    crate::ui::place_cursor_in(
+        f,
+        Rect {
+            x: inner.x.saturating_add(8),
+            y: inner.y.saturating_add(2),
+            width: inner.width.saturating_sub(8),
+            height: 1,
+        },
+        0,
+        value,
+    );
 }
 
 pub fn draw_domain_remove(
@@ -711,6 +742,7 @@ pub fn draw_filter(f: &mut Frame, state: &AppState, area: Rect, query: &str, sel
         Span::styled(query.to_string(), theme.input_text_focus),
     ]));
     f.render_widget(input, chunks[0]);
+    crate::ui::place_cursor_in(f, chunks[0], 1, query);
 
     let mut lines: Vec<Line> = Vec::new();
     if hits.is_empty() {
@@ -784,6 +816,7 @@ pub fn draw_palette(
         ]),
         Line::from(""),
     ];
+    let query_row = 3u16;
     if hits.is_empty() {
         lines.push(Line::from(Span::styled("no matches", theme.warning_style)));
     } else {
@@ -828,6 +861,18 @@ pub fn draw_palette(
             .style(theme.modal),
     );
     f.render_widget(p, area);
+    let inner = Block::default().borders(Borders::ALL).inner(area);
+    crate::ui::place_cursor_in(
+        f,
+        Rect {
+            x: inner.x.saturating_add(2),
+            y: inner.y.saturating_add(query_row),
+            width: inner.width.saturating_sub(2),
+            height: 1,
+        },
+        0,
+        query,
+    );
 }
 
 fn draw_palette_form(f: &mut Frame, state: &mut AppState, area: Rect, form: &PaletteForm) {
@@ -1136,45 +1181,22 @@ fn draw_text_input(
         Paragraph::new(input_value_line(theme, value, placeholder, focused)),
         inner,
     );
+    if focused {
+        crate::ui::place_cursor_in(f, inner, 0, value);
+    }
 }
 
 fn input_value_line(theme: &Theme, value: &str, placeholder: &str, focused: bool) -> Line<'static> {
-    let caret = Span::styled(
-        "█",
-        Style::default()
-            .fg(theme.colors.cursor)
-            .add_modifier(Modifier::RAPID_BLINK),
-    );
     if value.is_empty() {
-        let mut spans = Vec::new();
-        if focused && cursor_on() {
-            spans.push(caret);
-        } else if focused {
-            spans.push(Span::raw(" "));
-        }
-        spans.push(Span::styled(placeholder.to_string(), theme.secondary));
-        Line::from(spans)
+        Line::from(Span::styled(placeholder.to_string(), theme.secondary))
     } else {
         let text = if focused {
             theme.input_text_focus
         } else {
             theme.input_text
         };
-        let mut spans = vec![Span::styled(value.to_string(), text)];
-        if focused && cursor_on() {
-            spans.push(caret);
-        } else if focused {
-            spans.push(Span::raw(" "));
-        }
-        Line::from(spans)
+        Line::from(Span::styled(value.to_string(), text))
     }
-}
-
-fn cursor_on() -> bool {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| (d.as_millis() / 400) % 2 == 0)
-        .unwrap_or(true)
 }
 
 fn palette_filled(form: &PaletteForm) -> Vec<(String, String)> {

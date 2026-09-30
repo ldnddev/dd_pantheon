@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use dd_pantheon::app::App;
 use dd_pantheon::state::{FocusPane, Modal, TreeSel};
 use dd_pantheon::ui::footer_keys;
@@ -221,4 +221,76 @@ fn header_and_footer_heights_are_fixed() {
         .split(area);
     assert_eq!(outer[0].height, 3);
     assert_eq!(outer[2].height, 1);
+}
+
+fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
+    MouseEvent {
+        kind,
+        column,
+        row,
+        modifiers: KeyModifiers::NONE,
+    }
+}
+
+#[test]
+fn click_outside_help_closes_click_outside_quit_does_not() {
+    let (mut app, root) = demo_app();
+    app.state.modal = Some(Modal::Help { scroll: 0 });
+    app.state.modal_area = Some(ratatui::layout::Rect::new(10, 5, 40, 20));
+    app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 0, 0))
+        .unwrap();
+    assert!(app.state.modal.is_none());
+
+    app.state.modal = Some(Modal::QuitConfirm);
+    app.state.modal_area = Some(ratatui::layout::Rect::new(10, 5, 40, 20));
+    app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 0, 0))
+        .unwrap();
+    assert!(matches!(app.state.modal, Some(Modal::QuitConfirm)));
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn page_down_and_home_move_tree() {
+    let (mut app, root) = demo_app();
+    app.state.focus = FocusPane::Tree;
+    app.state.tree_area = ratatui::layout::Rect::new(0, 0, 30, 8);
+    app.handle_key(key(KeyCode::Home)).unwrap();
+    assert_eq!(app.state.tree_state.selected(), Some(0));
+    app.handle_key(key(KeyCode::PageDown)).unwrap();
+    assert_ne!(
+        app.state.tree_state.selected(),
+        Some(0),
+        "PageDown should move the tree selection"
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn log_scroll_up_stops_follow_and_g_resumes() {
+    let (mut app, root) = demo_app();
+    app.state.focus = FocusPane::Log;
+    app.state.log_area = ratatui::layout::Rect::new(0, 0, 80, 12);
+    app.state.log_lines = (0..40).map(|i| format!("line {i}")).collect();
+    app.state.log_follow = true;
+    app.state.snap_log_follow();
+    app.handle_key(key(KeyCode::Char('k'))).unwrap();
+    assert!(!app.state.log_follow);
+    app.handle_key(key(KeyCode::Char('G'))).unwrap();
+    assert!(app.state.log_follow);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn idle_tick_skips_redraw() {
+    let (mut app, root) = demo_app();
+    app.state.toast = None;
+    app.state.config.dirty_since = None;
+    app.state.config.sites_dirty_since = None;
+    let _ = app.tick();
+    app.state.toast = None;
+    app.state.config.dirty_since = None;
+    app.state.config.sites_dirty_since = None;
+    assert!(!app.tick());
+    assert!(app.next_poll_timeout().is_none());
+    let _ = fs::remove_dir_all(root);
 }

@@ -1,9 +1,24 @@
 use crate::state::{AppState, CmsFocus, CreateField, FocusPane, Modal, PaletteForm, PreviewButton};
 use crate::toast::ToastLevel;
 use anyhow::Result;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{
+    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use ratatui::layout::Rect;
 use std::path::PathBuf;
+
+/// Keys, clicks, wheel, and resize change the UI. Mouse motion and key-up do not.
+pub fn event_is_actionable(event: &Event) -> bool {
+    match event {
+        Event::Key(key) => key.kind == KeyEventKind::Press || key.kind == KeyEventKind::Repeat,
+        Event::Mouse(mouse) => matches!(
+            mouse.kind,
+            MouseEventKind::Down(_) | MouseEventKind::ScrollDown | MouseEventKind::ScrollUp
+        ),
+        Event::Resize(_, _) => true,
+        _ => false,
+    }
+}
 
 pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
     if key.kind != crossterm::event::KeyEventKind::Press
@@ -42,7 +57,7 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
 
     if !text_field {
         match key.code {
-            KeyCode::F(1) => {
+            KeyCode::F(1) | KeyCode::Char('?') => {
                 state.modal = Some(Modal::Help { scroll: 0 });
                 return Ok(false);
             }
@@ -266,6 +281,19 @@ fn handle_modal(state: &mut AppState, key: KeyEvent, modal: Modal) -> Result<boo
                     scroll: scroll.saturating_sub(1),
                 });
             }
+            KeyCode::PageDown => {
+                state.modal = Some(Modal::Help {
+                    scroll: scroll.saturating_add(10),
+                });
+            }
+            KeyCode::PageUp => {
+                state.modal = Some(Modal::Help {
+                    scroll: scroll.saturating_sub(10),
+                });
+            }
+            KeyCode::Home | KeyCode::Char('g') => {
+                state.modal = Some(Modal::Help { scroll: 0 });
+            }
             _ => {}
         },
         Modal::ThemeEditor(_) => {
@@ -282,6 +310,19 @@ fn handle_modal(state: &mut AppState, key: KeyEvent, modal: Modal) -> Result<boo
                 state.modal = Some(Modal::Doctor {
                     scroll: scroll.saturating_sub(1),
                 });
+            }
+            KeyCode::PageDown => {
+                state.modal = Some(Modal::Doctor {
+                    scroll: scroll.saturating_add(10),
+                });
+            }
+            KeyCode::PageUp => {
+                state.modal = Some(Modal::Doctor {
+                    scroll: scroll.saturating_sub(10),
+                });
+            }
+            KeyCode::Home | KeyCode::Char('g') => {
+                state.modal = Some(Modal::Doctor { scroll: 0 });
             }
             _ => {}
         },
@@ -975,8 +1016,11 @@ fn handle_modal(state: &mut AppState, key: KeyEvent, modal: Modal) -> Result<boo
             KeyCode::Char('k') | KeyCode::Up => scroll_log(state, -1),
             KeyCode::PageDown => scroll_log(state, log_page_size(state) as i32),
             KeyCode::PageUp => scroll_log(state, -(log_page_size(state) as i32)),
-            KeyCode::Char('g') => state.log_scroll = 0,
-            KeyCode::Char('G') => jump_log_bottom(state),
+            KeyCode::Char('g') | KeyCode::Home => {
+                state.log_scroll = 0;
+                state.log_follow = false;
+            }
+            KeyCode::Char('G') | KeyCode::End => jump_log_bottom(state),
             _ => {}
         },
         Modal::QuitConfirm => match key.code {
@@ -1283,8 +1327,16 @@ fn handle_tree(state: &mut AppState, key: KeyEvent) -> Result<bool> {
     match key.code {
         KeyCode::Char('j') | KeyCode::Down => state.move_tree(1),
         KeyCode::Char('k') | KeyCode::Up => state.move_tree(-1),
-        KeyCode::Char('g') => state.jump_tree(false),
-        KeyCode::Char('G') => state.jump_tree(true),
+        KeyCode::Char('g') | KeyCode::Home => state.jump_tree(false),
+        KeyCode::Char('G') | KeyCode::End => state.jump_tree(true),
+        KeyCode::PageDown => {
+            let page = tree_page(state);
+            state.move_tree(page);
+        }
+        KeyCode::PageUp => {
+            let page = tree_page(state);
+            state.move_tree(-page);
+        }
         KeyCode::Char('h') | KeyCode::Left | KeyCode::Char('l') | KeyCode::Right => {
             state.toggle_expand();
         }
@@ -1295,6 +1347,10 @@ fn handle_tree(state: &mut AppState, key: KeyEvent) -> Result<bool> {
     Ok(false)
 }
 
+fn tree_page(state: &AppState) -> isize {
+    (state.tree_area.height.saturating_sub(2)).max(1) as isize
+}
+
 fn handle_inspector(state: &mut AppState, key: KeyEvent) -> Result<bool> {
     match key.code {
         KeyCode::Char('j') | KeyCode::Down => {
@@ -1303,6 +1359,16 @@ fn handle_inspector(state: &mut AppState, key: KeyEvent) -> Result<bool> {
         KeyCode::Char('k') | KeyCode::Up => {
             state.inspector_scroll = state.inspector_scroll.saturating_sub(1);
         }
+        KeyCode::PageDown => {
+            let page = (state.inspector_area.height.saturating_sub(2)).max(1);
+            state.inspector_scroll = state.inspector_scroll.saturating_add(page);
+        }
+        KeyCode::PageUp => {
+            let page = (state.inspector_area.height.saturating_sub(2)).max(1);
+            state.inspector_scroll = state.inspector_scroll.saturating_sub(page);
+        }
+        KeyCode::Home | KeyCode::Char('g') => state.inspector_scroll = 0,
+        KeyCode::End | KeyCode::Char('G') => state.inspector_scroll = u16::MAX,
         KeyCode::Enter => {
             crate::workflows::request_run(state);
         }
@@ -1351,6 +1417,13 @@ fn handle_preview(state: &mut AppState, key: KeyEvent) -> Result<bool> {
         KeyCode::Char('k') | KeyCode::Up => {
             state.preview_scroll = state.preview_scroll.saturating_sub(1);
         }
+        KeyCode::PageDown => {
+            state.preview_scroll = state.preview_scroll.saturating_add(5);
+        }
+        KeyCode::PageUp => {
+            state.preview_scroll = state.preview_scroll.saturating_sub(5);
+        }
+        KeyCode::Home | KeyCode::Char('g') => state.preview_scroll = 0,
         _ => {}
     }
     Ok(false)
@@ -1363,8 +1436,11 @@ fn handle_log(state: &mut AppState, key: KeyEvent) -> Result<bool> {
         KeyCode::Char('k') | KeyCode::Up => scroll_log(state, -1),
         KeyCode::PageDown => scroll_log(state, log_page_size(state) as i32),
         KeyCode::PageUp => scroll_log(state, -(log_page_size(state) as i32)),
-        KeyCode::Char('g') => state.log_scroll = 0,
-        KeyCode::Char('G') => jump_log_bottom(state),
+        KeyCode::Char('g') | KeyCode::Home => {
+            state.log_scroll = 0;
+            state.log_follow = false;
+        }
+        KeyCode::Char('G') | KeyCode::End => jump_log_bottom(state),
         _ => {}
     }
     Ok(false)
@@ -1376,26 +1452,23 @@ fn open_log_expand(state: &mut AppState) {
 }
 
 fn scroll_log(state: &mut AppState, delta: i32) {
+    let vis = log_page_size(state);
+    let max = (state.log_lines.len() as u16).saturating_sub(vis);
     if delta >= 0 {
-        let max = state.log_lines.len().saturating_sub(1) as u16;
         state.log_scroll = state.log_scroll.saturating_add(delta as u16).min(max);
     } else {
         state.log_scroll = state.log_scroll.saturating_sub(delta.unsigned_abs() as u16);
     }
+    state.log_follow = state.log_scroll >= max;
 }
 
 fn jump_log_bottom(state: &mut AppState) {
-    let visible = log_page_size(state);
-    state.log_scroll = (state.log_lines.len() as u16).saturating_sub(visible);
+    state.log_follow = true;
+    state.snap_log_follow();
 }
 
 fn log_page_size(state: &AppState) -> u16 {
-    let h = if matches!(state.modal, Some(Modal::LogExpand)) {
-        state.modal_area.map(|r| r.height).unwrap_or(24)
-    } else {
-        state.log_area.height
-    };
-    h.saturating_sub(3).max(1)
+    state.log_visible_rows()
 }
 
 fn apply_metrics_period_key(state: &mut AppState, key: KeyEvent) -> bool {
@@ -1440,57 +1513,66 @@ fn shared_action_keys(state: &mut AppState, code: KeyCode) {
 pub fn handle_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
     let (x, y) = (mouse.column, mouse.row);
     if let Some(area) = state.modal_area {
-        if contains(area, x, y) {
-            if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
-                let field_hits = state.form_field_hits.clone();
-                let companion_hits = state.companion_hits.clone();
-                if let Some(hit) = field_hits.iter().find(|h| contains(h.area, x, y)) {
-                    match &mut state.modal {
-                        Some(Modal::Palette {
-                            form: Some(form), ..
-                        }) => {
-                            form.focus = hit.focus;
-                        }
-                        Some(Modal::Cms { form }) => {
-                            form.focus = CmsFocus::Command;
-                        }
-                        _ => {}
-                    }
-                } else if let Some(hit) = companion_hits.iter().find(|h| contains(h.area, x, y)) {
-                    match &mut state.modal {
-                        Some(Modal::Palette {
-                            form: Some(form), ..
-                        }) => {
-                            form.extra = hit.insert.clone();
-                            form.focus = form.field_count().saturating_sub(1);
-                        }
-                        Some(Modal::Cms { form }) => {
-                            form.command = hit.insert.clone();
-                            form.focus = CmsFocus::Command;
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            if let MouseEventKind::ScrollDown | MouseEventKind::ScrollUp = mouse.kind {
-                let down = matches!(mouse.kind, MouseEventKind::ScrollDown);
-                if matches!(state.modal, Some(Modal::LogExpand)) {
-                    scroll_log(state, if down { 1 } else { -1 });
-                } else {
-                    match &mut state.modal {
-                        Some(Modal::Help { scroll }) | Some(Modal::Doctor { scroll }) => {
-                            if down {
-                                *scroll = scroll.saturating_add(1);
-                            } else {
-                                *scroll = scroll.saturating_sub(1);
-                            }
-                        }
-                        _ => {}
-                    }
-                }
+        if !contains(area, x, y) {
+            if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+                && state
+                    .modal
+                    .as_ref()
+                    .is_some_and(Modal::dismiss_on_click_outside)
+            {
+                dismiss_modal(state);
             }
             return Ok(false);
         }
+        if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+            let field_hits = state.form_field_hits.clone();
+            let companion_hits = state.companion_hits.clone();
+            if let Some(hit) = field_hits.iter().find(|h| contains(h.area, x, y)) {
+                match &mut state.modal {
+                    Some(Modal::Palette {
+                        form: Some(form), ..
+                    }) => {
+                        form.focus = hit.focus;
+                    }
+                    Some(Modal::Cms { form }) => {
+                        form.focus = CmsFocus::Command;
+                    }
+                    _ => {}
+                }
+            } else if let Some(hit) = companion_hits.iter().find(|h| contains(h.area, x, y)) {
+                match &mut state.modal {
+                    Some(Modal::Palette {
+                        form: Some(form), ..
+                    }) => {
+                        form.extra = hit.insert.clone();
+                        form.focus = form.field_count().saturating_sub(1);
+                    }
+                    Some(Modal::Cms { form }) => {
+                        form.command = hit.insert.clone();
+                        form.focus = CmsFocus::Command;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        if let MouseEventKind::ScrollDown | MouseEventKind::ScrollUp = mouse.kind {
+            let down = matches!(mouse.kind, MouseEventKind::ScrollDown);
+            if matches!(state.modal, Some(Modal::LogExpand)) {
+                scroll_log(state, if down { 1 } else { -1 });
+            } else {
+                match &mut state.modal {
+                    Some(Modal::Help { scroll }) | Some(Modal::Doctor { scroll }) => {
+                        if down {
+                            *scroll = scroll.saturating_add(1);
+                        } else {
+                            *scroll = scroll.saturating_sub(1);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        return Ok(false);
     }
 
     match mouse.kind {
@@ -1609,6 +1691,14 @@ fn row_at(area: Rect, y: u16, len: usize) -> Option<usize> {
     if idx < len { Some(idx) } else { None }
 }
 
+fn dismiss_modal(state: &mut AppState) {
+    if let Some(Modal::ThemeEditor(editor)) = &mut state.modal {
+        editor.revert();
+        state.theme = crate::theme::theme_from_palette(editor.palette.clone());
+    }
+    state.modal = None;
+}
+
 fn handle_theme_editor(state: &mut AppState, key: KeyEvent) {
     let Some(ek) = map_editor_key(key) else {
         if key.code == KeyCode::F(2) {
@@ -1695,4 +1785,39 @@ fn save_theme_editor(state: &mut AppState) -> anyhow::Result<()> {
     );
     state.modal = None;
     Ok(())
+}
+
+#[cfg(test)]
+mod event_filter_tests {
+    use super::*;
+    use crossterm::event::KeyEventState;
+
+    #[test]
+    fn motion_and_key_release_are_not_actionable() {
+        let key_up = Event::Key(KeyEvent {
+            code: KeyCode::Char('j'),
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Release,
+            state: KeyEventState::NONE,
+        });
+        assert!(!event_is_actionable(&key_up));
+        let moved = Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Moved,
+            column: 1,
+            row: 1,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert!(!event_is_actionable(&moved));
+        let press = Event::Key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        assert!(event_is_actionable(&press));
+        let down = Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 1,
+            row: 1,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert!(event_is_actionable(&down));
+        let resize = Event::Resize(80, 24);
+        assert!(event_is_actionable(&resize));
+    }
 }

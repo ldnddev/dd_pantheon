@@ -173,6 +173,26 @@ pub enum Modal {
     QuitConfirm,
 }
 
+impl Modal {
+    /// Clicking the dimmed chrome closes these; gated / in-progress forms stay put.
+    pub fn dismiss_on_click_outside(&self) -> bool {
+        matches!(
+            self,
+            Self::Help { .. }
+                | Self::Doctor { .. }
+                | Self::Filter { .. }
+                | Self::Palette { form: None, .. }
+                | Self::Error { .. }
+                | Self::LogExpand
+                | Self::TagPicker { .. }
+                | Self::OrgPicker { .. }
+                | Self::ThemeEditor(_)
+                | Self::BackupPick { .. }
+                | Self::DomainRemove { .. }
+        )
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BackupPickKind {
     Restore,
@@ -453,10 +473,14 @@ pub struct AppState {
     pub actions: Vec<ActionItem>,
 
     pub log_scroll: u16,
+    /// When true, new job output keeps the log pinned to the tail.
+    pub log_follow: bool,
     pub preview_scroll: u16,
     pub inspector_scroll: u16,
     pub log_lines: Vec<String>,
     pub job_running: bool,
+    /// Last painted loader glyph index; compared in `tick` so animation frames dirty the UI.
+    pub loader_frame: Option<usize>,
 
     pub current: Option<StagedPlan>,
     pub metrics: HashMap<(String, MetricsPeriod), MetricsSeries>,
@@ -543,10 +567,12 @@ impl AppState {
             action_state: ListState::default(),
             actions: default_actions(),
             log_scroll: 0,
+            log_follow: true,
             preview_scroll: 0,
             inspector_scroll: 0,
             log_lines: data.log_lines,
             job_running: false,
+            loader_frame: None,
             current: Some(data.plan),
             metrics: data.metrics,
             metrics_period: config.config.metrics_period,
@@ -609,10 +635,38 @@ impl AppState {
         self.toast = Some(Toast::new(level, message));
     }
 
-    pub fn clear_expired_toast(&mut self) {
+    pub fn clear_expired_toast(&mut self) -> bool {
         if self.toast.as_ref().is_some_and(|t| t.is_expired()) {
             self.toast = None;
+            true
+        } else {
+            false
         }
+    }
+
+    pub fn log_visible_rows(&self) -> u16 {
+        let h = if matches!(self.modal, Some(Modal::LogExpand)) {
+            self.modal_area.map(|r| r.height).unwrap_or(24)
+        } else if self.log_area.height > 0 {
+            self.log_area.height
+        } else {
+            12
+        };
+        h.saturating_sub(3).max(1)
+    }
+
+    pub fn snap_log_follow(&mut self) {
+        if !self.log_follow {
+            return;
+        }
+        let vis = self.log_visible_rows();
+        self.log_scroll = (self.log_lines.len() as u16).saturating_sub(vis);
+    }
+
+    pub fn log_at_bottom(&self) -> bool {
+        let vis = self.log_visible_rows();
+        let max = (self.log_lines.len() as u16).saturating_sub(vis);
+        self.log_scroll >= max
     }
 
     pub fn rebuild_tree(&mut self) {
@@ -621,8 +675,11 @@ impl AppState {
         let mut rows = Vec::new();
         for site in &self.sites {
             if !site_matches(site, &filter, tag_filter.as_deref()) {
-                let envs = self.envs.get(&site.name).cloned().unwrap_or_default();
-                if !envs.iter().any(|e| env_matches(e, &filter)) && !filter.is_empty() {
+                let any_env = self
+                    .envs
+                    .get(&site.name)
+                    .is_some_and(|envs| envs.iter().any(|e| env_matches(e, &filter)));
+                if !any_env && !filter.is_empty() {
                     continue;
                 }
                 if tag_filter.is_some() && !site_matches(site, "", tag_filter.as_deref()) {
@@ -891,12 +948,16 @@ impl AppState {
         let mut hits = Vec::new();
         for site in &self.sites {
             let site_ok = site_matches(site, &filter, tag_filter);
-            let envs = self.envs.get(&site.name).cloned().unwrap_or_default();
-            let matching_envs: Vec<_> = envs
-                .iter()
-                .filter(|e| env_matches(e, &filter))
-                .cloned()
-                .collect();
+            let matching_ids: Vec<&str> = self
+                .envs
+                .get(&site.name)
+                .map(|envs| {
+                    envs.iter()
+                        .filter(|e| env_matches(e, &filter))
+                        .map(|e| e.id.as_str())
+                        .collect()
+                })
+                .unwrap_or_default();
             if site_ok {
                 hits.push(FilterHit {
                     site: site.name.clone(),
@@ -904,21 +965,21 @@ impl AppState {
                     tags: site.tags.iter().map(|t| t.name.clone()).collect(),
                 });
                 if !filter.is_empty() {
-                    for env in matching_envs {
+                    for env in matching_ids {
                         if !site_matches(site, &filter, None) {
                             hits.push(FilterHit {
                                 site: site.name.clone(),
-                                env: Some(env.id),
+                                env: Some(env.to_string()),
                                 tags: Vec::new(),
                             });
                         }
                     }
                 }
-            } else if !matching_envs.is_empty() {
-                for env in matching_envs {
+            } else if !matching_ids.is_empty() {
+                for env in matching_ids {
                     hits.push(FilterHit {
                         site: site.name.clone(),
-                        env: Some(env.id),
+                        env: Some(env.to_string()),
                         tags: site.tags.iter().map(|t| t.name.clone()).collect(),
                     });
                 }

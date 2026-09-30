@@ -6,6 +6,7 @@ use crossterm::{
 };
 use dd_pantheon::app::{App, LaunchOpts};
 use dd_pantheon::config::default_config_dir;
+use dd_pantheon::input::event_is_actionable;
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io::{self, Write, stdout};
 use std::path::PathBuf;
@@ -54,23 +55,43 @@ fn run_app(cli: RunOpts) -> Result<()> {
     }
 
     let result = (|| -> Result<()> {
+        let mut needs_draw = true;
         loop {
-            app.tick();
-            terminal.draw(|f| app.draw(f))?;
-            if event::poll(Duration::from_millis(100))? {
+            if app.tick() {
+                needs_draw = true;
+            }
+            if needs_draw {
+                terminal.draw(|f| app.draw(f))?;
+                needs_draw = false;
+            }
+            if app.state.should_quit {
+                break;
+            }
+            // Idle: wait up to a minute for input. Jobs/toasts/debounces wake sooner.
+            let timeout = app.next_poll_timeout().unwrap_or(Duration::from_secs(60));
+            if !event::poll(timeout)? {
+                continue;
+            }
+            loop {
                 match event::read()? {
+                    ev if !event_is_actionable(&ev) => {}
                     Event::Key(key) => {
                         if app.handle_key(key)? {
-                            break;
+                            app.state.should_quit = true;
                         }
+                        needs_draw = true;
                     }
                     Event::Mouse(mouse) => {
                         if app.handle_mouse(mouse)? {
-                            break;
+                            app.state.should_quit = true;
                         }
+                        needs_draw = true;
                     }
-                    Event::Resize(_, _) => {}
+                    Event::Resize(_, _) => needs_draw = true,
                     _ => {}
+                }
+                if app.state.should_quit || !event::poll(Duration::ZERO)? {
+                    break;
                 }
             }
         }

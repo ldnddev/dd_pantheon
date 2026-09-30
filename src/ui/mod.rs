@@ -18,6 +18,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+use unicode_width::UnicodeWidthStr;
 
 pub fn draw(f: &mut Frame, state: &mut AppState) {
     state.last_frame = f.area();
@@ -58,6 +59,17 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
     }
 }
 
+pub fn place_cursor_in(f: &mut Frame, inner: ratatui::layout::Rect, prefix_cols: u16, value: &str) {
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+    let col = prefix_cols.saturating_add(value.width() as u16);
+    let x = inner
+        .x
+        .saturating_add(col.min(inner.width.saturating_sub(1)));
+    f.set_cursor_position(ratatui::layout::Position::new(x, inner.y));
+}
+
 fn draw_modal(f: &mut Frame, state: &mut AppState, area: Rect) {
     use crate::state::Modal;
     let modal_area = match &state.modal {
@@ -70,9 +82,24 @@ fn draw_modal(f: &mut Frame, state: &mut AppState, area: Rect) {
     state.modal_area = Some(modal_area);
     f.render_widget(Clear, modal_area);
 
+    if matches!(state.modal, Some(Modal::ThemeEditor(_))) {
+        theme_modal::draw(f, state, modal_area);
+        return;
+    }
+    if matches!(state.modal, Some(Modal::LogExpand)) {
+        log::draw_expanded(f, state, modal_area);
+        return;
+    }
+    if let Some(scroll) = match &state.modal {
+        Some(Modal::Help { scroll }) => Some(*scroll),
+        _ => None,
+    } {
+        help::draw(f, state, modal_area, scroll);
+        return;
+    }
+
     match state.modal.clone() {
-        Some(Modal::Help { scroll }) => help::draw(f, state, modal_area, scroll),
-        Some(Modal::ThemeEditor(_)) => theme_modal::draw(f, state, modal_area),
+        Some(Modal::Help { .. } | Modal::ThemeEditor(_) | Modal::LogExpand) => {}
         Some(Modal::Doctor { scroll }) => {
             let body = crate::doctor::render(
                 &state.tools,
@@ -270,7 +297,6 @@ fn draw_modal(f: &mut Frame, state: &mut AppState, area: Rect) {
                 );
             f.render_widget(p, modal_area);
         }
-        Some(Modal::LogExpand) => log::draw_expanded(f, state, modal_area),
         None => {}
     }
 }
