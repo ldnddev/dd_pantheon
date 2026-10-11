@@ -121,51 +121,108 @@ pub fn draw_livegate(
     expected: &str,
     typed: &str,
 ) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(6), Constraint::Length(3)])
-        .split(area);
+    let matched = !expected.is_empty() && typed == expected;
+    let word = if expected.is_empty() {
+        "the word"
+    } else {
+        expected
+    };
+    let block = Block::default()
+        .title("LiveGate")
+        .borders(Borders::ALL)
+        .border_style(theme.error)
+        .style(theme.modal);
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+
+    let hint = if matched {
+        "Enter runs this command. Esc cancels."
+    } else if !typed.is_empty() && !expected.starts_with(typed) {
+        "That does not match. Esc cancels."
+    } else {
+        "Enter does nothing until the word matches."
+    };
+    let on_modal = |fg| Style::default().fg(fg).bg(theme.colors.modal_background);
+    let hint_style = if matched {
+        on_modal(theme.colors.success)
+    } else if !typed.is_empty() && !expected.starts_with(typed) {
+        on_modal(theme.colors.error)
+    } else {
+        on_modal(theme.colors.warning)
+    };
     let lines = vec![
         Line::from(Span::styled(
-            format!("LIVEGATE — type: {expected}"),
+            format!("type {word} to run"),
             theme.modal_header.add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
-        Line::from(plan.redacted_shell_line()),
+        Line::from(Span::styled(plan.redacted_shell_line(), theme.modal_text)),
         Line::from(""),
         Line::from(vec![
             Span::styled("target  ", theme.modal_label),
-            Span::raw(plan.target.label()),
+            Span::styled(plan.target.label(), theme.modal_text),
         ]),
         Line::from(vec![
             Span::styled("why     ", theme.modal_label),
-            Span::raw(plan.why.clone()),
+            Span::styled(plan.why.clone(), theme.modal_text),
         ]),
         Line::from(""),
-        Line::from("Esc cancel. y is a character, not confirm."),
+        Line::from(Span::styled(hint, hint_style)),
+        Line::from(Span::styled(
+            "y is a character, not confirm.",
+            on_modal(theme.colors.text_secondary),
+        )),
     ];
-    let p = Paragraph::new(lines).wrap(Wrap { trim: false }).block(
-        Block::default()
-            .title("LiveGate")
-            .borders(Borders::ALL)
-            .border_style(theme.error)
-            .style(theme.modal),
+    let input_h = 3.min(inner.height);
+    let width = inner.width as usize;
+    let content_rows = wrap_rows(&format!("type {word} to run"), width)
+        + 1
+        + wrap_rows(&plan.redacted_shell_line(), width)
+        + 1
+        + wrap_rows(&format!("target  {}", plan.target.label()), width)
+        + wrap_rows(&format!("why     {}", plan.why), width)
+        + 1
+        + wrap_rows(hint, width)
+        + 1;
+    // One spare row so a word-wrap does not slide the last line under the field.
+    let text_h = content_rows
+        .saturating_add(1)
+        .min(inner.height.saturating_sub(input_h));
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(text_h),
+            Constraint::Length(input_h),
+            Constraint::Min(0),
+        ])
+        .split(inner);
+    f.render_widget(
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .style(theme.modal_text),
+        chunks[0],
     );
-    f.render_widget(p, chunks[0]);
-    let input = Paragraph::new(typed).block(
-        Block::default()
-            .title("type gate word")
-            .borders(Borders::ALL)
-            .border_style(theme.input_border_focus)
-            .style(
-                Style::default()
-                    .fg(theme.colors.input_text_focus)
-                    .bg(theme.colors.modal_background),
-            ),
+    let mismatch = !typed.is_empty() && !expected.is_empty() && !expected.starts_with(typed);
+    draw_text_input(
+        f,
+        theme,
+        chunks[1],
+        &format!("type {word}"),
+        typed,
+        "",
+        true,
+        mismatch.then_some(theme.error),
     );
-    f.render_widget(input, chunks[1]);
-    let inner = Block::default().borders(Borders::ALL).inner(chunks[1]);
-    crate::ui::place_cursor_in(f, inner, 0, typed);
+}
+
+fn wrap_rows(text: &str, width: usize) -> u16 {
+    if text.is_empty() || width == 0 {
+        return 1;
+    }
+    text.width().div_ceil(width).max(1) as u16
 }
 
 pub fn draw_diffstat_dirty(
@@ -999,6 +1056,7 @@ fn draw_palette_form(f: &mut Frame, state: &mut AppState, area: Rect, form: &Pal
             value,
             placeholder,
             form.focus == *focus,
+            None,
         );
         state.form_field_hits.push(crate::state::FormFieldHit {
             focus: *focus,
@@ -1153,6 +1211,7 @@ fn draw_text_input(
     value: &str,
     placeholder: &str,
     focused: bool,
+    value_style: Option<Style>,
 ) {
     if area.width == 0 || area.height == 0 {
         return;
@@ -1178,7 +1237,13 @@ fn draw_text_input(
         return;
     }
     f.render_widget(
-        Paragraph::new(input_value_line(theme, value, placeholder, focused)),
+        Paragraph::new(input_value_line(
+            theme,
+            value,
+            placeholder,
+            focused,
+            value_style,
+        )),
         inner,
     );
     if focused {
@@ -1186,15 +1251,21 @@ fn draw_text_input(
     }
 }
 
-fn input_value_line(theme: &Theme, value: &str, placeholder: &str, focused: bool) -> Line<'static> {
+fn input_value_line(
+    theme: &Theme,
+    value: &str,
+    placeholder: &str,
+    focused: bool,
+    value_style: Option<Style>,
+) -> Line<'static> {
     if value.is_empty() {
         Line::from(Span::styled(placeholder.to_string(), theme.secondary))
     } else {
-        let text = if focused {
+        let text = value_style.unwrap_or(if focused {
             theme.input_text_focus
         } else {
             theme.input_text
-        };
+        });
         Line::from(Span::styled(value.to_string(), text))
     }
 }
@@ -1311,6 +1382,7 @@ pub fn draw_cms(f: &mut Frame, state: &mut AppState, area: Rect, form: &CmsForm)
         &form.command,
         "type a CMS command…  e.g. plugin list",
         form.focus == CmsFocus::Command,
+        None,
     );
     state.form_field_hits.push(crate::state::FormFieldHit {
         focus: 2,

@@ -77,6 +77,7 @@ fn draw_modal(f: &mut Frame, state: &mut AppState, area: Rect) {
         Some(Modal::Palette { form: None, .. }) => centered_rect(78, 74, area),
         Some(Modal::Palette { form: Some(_), .. }) => centered_rect(84, 86, area),
         Some(Modal::LogExpand) => centered_rect(96, 92, area),
+        Some(Modal::LiveGate { .. }) => centered_box(76, 16, area),
         _ => centered_rect(72, 70, area),
     };
     state.modal_area = Some(modal_area);
@@ -346,6 +347,17 @@ fn draw_toast(f: &mut Frame, state: &mut AppState, area: Rect) {
     f.render_widget(text, toast_area);
 }
 
+pub fn centered_box(width: u16, height: u16, area: Rect) -> Rect {
+    let w = width.min(area.width);
+    let h = height.min(area.height);
+    Rect {
+        x: area.x + area.width.saturating_sub(w) / 2,
+        y: area.y + area.height.saturating_sub(h) / 2,
+        width: w,
+        height: h,
+    }
+}
+
 pub fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
     let v = Layout::default()
         .direction(Direction::Vertical)
@@ -379,4 +391,116 @@ pub fn pane_block<'a>(
             theme.border
         })
         .style(theme.body)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::ConfigStore;
+    use crate::fixtures::demo_data;
+    use crate::plan::{CommandPlan, PlanTarget, SafetyTier, ToolKind};
+    use crate::state::{AppState, Modal};
+    use crate::theme::Theme;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use ratatui::buffer::Buffer;
+    use std::path::PathBuf;
+
+    fn demo_state() -> AppState {
+        let dir = std::env::temp_dir().join(format!("dd_pantheon_ui_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        AppState::from_demo(Theme::default(), ConfigStore::load(&dir), demo_data())
+    }
+
+    fn gate_plan() -> CommandPlan {
+        CommandPlan {
+            tool: ToolKind::Terminus,
+            binary: PathBuf::from("terminus"),
+            argv: vec!["env:deploy".into(), "acme-wp.live".into()],
+            cwd: None,
+            why: "deploy code to acme-wp.live".into(),
+            safety: SafetyTier::LiveGate,
+            target: PlanTarget::Env {
+                site: "acme-wp".into(),
+                env: "live".into(),
+            },
+            dry_run: false,
+            timeout: None,
+            expects_json: false,
+            extra_env: Vec::new(),
+            redact: Vec::new(),
+            confirm_with_yes: true,
+        }
+    }
+
+    fn rows(buf: &Buffer, area: Rect) -> Vec<String> {
+        let mut lines = Vec::new();
+        for y in area.y..area.y.saturating_add(area.height) {
+            let mut line = String::new();
+            for x in area.x..area.x.saturating_add(area.width) {
+                line.push_str(buf[(x, y)].symbol());
+            }
+            lines.push(line);
+        }
+        lines
+    }
+
+    #[test]
+    fn tree_shows_name_and_status_and_inspector_keeps_tags() {
+        let mut state = demo_state();
+        let backend = TestBackend::new(120, 40);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| draw(f, &mut state)).unwrap();
+        let buf = term.backend().buffer();
+        let tree = rows(buf, state.tree_area).join("\n");
+        assert!(tree.contains("▾ acme-wp"), "{tree}");
+        assert!(tree.contains("feat-x"), "{tree}");
+        assert!(tree.contains("sftp"), "{tree}");
+        assert!(tree.contains("lock"), "{tree}");
+        assert!(tree.contains("frozen-lab  frozen"), "{tree}");
+        assert!(!tree.contains("[prod]"), "{tree}");
+        assert!(!tree.contains("[wp]"), "{tree}");
+        assert!(!tree.contains("[d10]"), "{tree}");
+        let inspector = rows(buf, state.inspector_area).join("\n");
+        assert!(inspector.contains("[prod]"), "{inspector}");
+        assert!(inspector.contains("WordPress"), "{inspector}");
+    }
+
+    #[test]
+    fn livegate_field_sits_under_the_copy() {
+        let mut state = demo_state();
+        state.modal = Some(Modal::LiveGate {
+            plan: gate_plan(),
+            expected: "live".into(),
+            typed: String::new(),
+        });
+        let backend = TestBackend::new(112, 34);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| draw(f, &mut state)).unwrap();
+        let lines = rows(term.backend().buffer(), term.backend().buffer().area);
+        let footer = lines.last().expect("footer");
+        assert!(footer.contains("type live"), "{footer}");
+        assert!(!footer.contains("Enter: Confirm"), "{footer}");
+        assert!(!footer.contains("click outside"), "{footer}");
+
+        let hint = lines
+            .iter()
+            .position(|line| line.contains("y is a character"))
+            .expect("hint");
+        let field = lines
+            .iter()
+            .position(|line| line.contains("type live") && line.contains('┌'))
+            .or_else(|| {
+                lines.iter().enumerate().position(|(idx, line)| {
+                    idx > hint && line.contains("type live") && !line.contains("to run")
+                })
+            })
+            .expect("field");
+        assert!(field > hint, "hint {hint} field {field}");
+        assert!(
+            field - hint <= 3,
+            "field drifted below the prompt: hint {hint} field {field}\n{}",
+            lines.join("\n")
+        );
+    }
 }

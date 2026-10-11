@@ -309,7 +309,7 @@ cargo run -- --root /path/to/site</code></pre>
         <figcaption>Test deploy form. Default note is <code>Deploy from dd_pantheon</code>. Unchecking sync-content skips the backup-first prefix.</figcaption>
       </figure>
       <figure>
-        <img src="images/demo-livegate.png" width="1264" height="712" alt="LiveGate modal titled type: live. Shows terminus env:deploy acme-wp.live --cc --note=Deploy from dd_pantheon --no-interaction --yes. Hint: Esc cancel. y is a character, not confirm. Input labeled type gate word.">
+        <img src="images/demo-livegate.png" width="1264" height="712" alt="LiveGate dialog. Header line says type live to run. Command is terminus env:deploy acme-wp.live with note Deploy from dd_pantheon, --no-interaction, and --yes. Target acme-wp.live. Why: deploy code to acme-wp.live. Hint: Enter does nothing until the word matches. y is a character, not confirm. Empty input titled type live. Footer: Esc Cancel, type live, Enter runs only when it matches, Ctrl+Q Quit.">
         <figcaption>
           Live deploy asks you to type <kbd>live</kbd>. A Lando DB push asks for
           <kbd>database</kbd> even if the dest is live — one word, not two.

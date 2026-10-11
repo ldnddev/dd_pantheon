@@ -73,15 +73,40 @@ pub fn draw_footer(f: &mut Frame, state: &AppState, area: Rect) {
 }
 
 pub fn footer_keys(width: u16) -> String {
-    footer_line_raw(width, FocusPane::Tree, false, false)
+    footer_line_raw(width, FocusPane::Tree, ModalChrome::None, false)
 }
 
 fn footer_line(width: u16, state: &AppState) -> String {
-    footer_line_raw(width, state.focus, state.modal.is_some(), state.job_running)
+    let chrome = match &state.modal {
+        Some(crate::state::Modal::LiveGate {
+            expected, typed, ..
+        }) => ModalChrome::LiveGate {
+            expected,
+            matched: !expected.is_empty() && typed == expected,
+        },
+        Some(_) => ModalChrome::Generic,
+        None => ModalChrome::None,
+    };
+    footer_line_raw(width, state.focus, chrome, state.job_running)
 }
 
-fn footer_line_raw(width: u16, focus: FocusPane, modal: bool, job_running: bool) -> String {
-    let raw = if width < 80 {
+#[derive(Clone, Copy)]
+enum ModalChrome<'a> {
+    None,
+    Generic,
+    LiveGate { expected: &'a str, matched: bool },
+}
+
+fn footer_line_raw(
+    width: u16,
+    focus: FocusPane,
+    modal: ModalChrome<'_>,
+    job_running: bool,
+) -> String {
+    let mut raw = if let ModalChrome::LiveGate { expected, matched } = modal {
+        // F1 and F2 do not open while the gate is collecting the word.
+        livegate_footer(width, expected, matched)
+    } else if width < 80 {
         "F1:Help  F2:Theme  C-q:Quit  /:Filter".to_string()
     } else if width < 120 {
         format!(
@@ -94,50 +119,83 @@ fn footer_line_raw(width: u16, focus: FocusPane, modal: bool, job_running: bool)
             pane_hint_wide(focus, modal, job_running)
         )
     };
+    if job_running && matches!(modal, ModalChrome::LiveGate { .. }) {
+        raw.push_str("   Ctrl+C: Cancel");
+    }
     truncate_from_right(&raw, width as usize)
 }
 
-fn pane_hint_medium(focus: FocusPane, modal: bool, job_running: bool) -> String {
-    let body = if modal {
-        "Esc: Close   Enter: Confirm"
+fn livegate_footer(width: u16, expected: &str, matched: bool) -> String {
+    let word = if expected.is_empty() {
+        "the word"
     } else {
-        match focus {
-            FocusPane::Tree => "j/k: Nav   Enter: Run   /: Filter   :: Pal",
-            FocusPane::Inspector => "j/k: Scroll   Enter: Run   m: CMS",
-            FocusPane::Preview => "Enter: Process   y: Copy   Esc: Unstage",
-            FocusPane::Log => "j/k: Scroll   Enter: Expand   G: Follow",
-        }
+        expected
     };
-    if job_running {
-        format!("{body}   Ctrl+C: Cancel")
+    if width < 80 {
+        if matched {
+            "Esc:Cancel  Enter:Run  C-q:Quit".to_string()
+        } else {
+            format!("Esc:Cancel  type {word}  C-q:Quit")
+        }
+    } else if matched {
+        "Esc: Cancel   Enter: Run   Ctrl+Q: Quit".to_string()
     } else {
-        body.to_string()
+        let full =
+            format!("Esc: Cancel   type {word}   Enter runs only when it matches   Ctrl+Q: Quit");
+        if full.width() as u16 <= width {
+            full
+        } else {
+            format!("Esc: Cancel   type {word}   Ctrl+Q: Quit")
+        }
     }
 }
 
-fn pane_hint_wide(focus: FocusPane, modal: bool, job_running: bool) -> String {
-    let body = if modal {
-        "Esc: Close   Enter: Confirm   click outside to dismiss"
-    } else {
-        match focus {
-            FocusPane::Tree => {
-                "j/k: Nav   Tab: Pane   Enter: Run   /: Filter   :: Palette   r: Refresh   (mouse: click/scroll)"
-            }
-            FocusPane::Inspector => {
-                "j/k: Scroll   Enter: Run   m: CMS   [ ]: Tags   d/w/M: Period   (mouse: click/scroll)"
-            }
-            FocusPane::Preview => {
-                "Enter: Process   y: Copy   Esc: Unstage   click Process/Copy/Cancel"
-            }
-            FocusPane::Log => {
-                "j/k: Scroll   Enter: Expand   g/G: Top/Follow   PgUp/PgDn   (mouse: click/scroll)"
-            }
-        }
+fn pane_hint_medium(focus: FocusPane, modal: ModalChrome<'_>, job_running: bool) -> String {
+    let body = match modal {
+        ModalChrome::Generic => "Esc: Close   Enter: Confirm".to_string(),
+        ModalChrome::LiveGate { .. } => String::new(),
+        ModalChrome::None => match focus {
+            FocusPane::Tree => "j/k: Nav   Enter: Run   /: Filter   :: Pal".to_string(),
+            FocusPane::Inspector => "j/k: Scroll   Enter: Run   m: CMS".to_string(),
+            FocusPane::Preview => "Enter: Process   y: Copy   Esc: Unstage".to_string(),
+            FocusPane::Log => "j/k: Scroll   Enter: Expand   G: Follow".to_string(),
+        },
     };
     if job_running {
         format!("{body}   Ctrl+C: Cancel")
     } else {
-        body.to_string()
+        body
+    }
+}
+
+fn pane_hint_wide(focus: FocusPane, modal: ModalChrome<'_>, job_running: bool) -> String {
+    let body = match modal {
+        ModalChrome::Generic => {
+            "Esc: Close   Enter: Confirm   click outside to dismiss".to_string()
+        }
+        ModalChrome::LiveGate { .. } => String::new(),
+        ModalChrome::None => match focus {
+            FocusPane::Tree => {
+                "j/k: Nav   Tab: Pane   Enter: Run   /: Filter   :: Palette   r: Refresh   (mouse: click/scroll)"
+                    .to_string()
+            }
+            FocusPane::Inspector => {
+                "j/k: Scroll   Enter: Run   m: CMS   [ ]: Tags   d/w/M: Period   (mouse: click/scroll)"
+                    .to_string()
+            }
+            FocusPane::Preview => {
+                "Enter: Process   y: Copy   Esc: Unstage   click Process/Copy/Cancel".to_string()
+            }
+            FocusPane::Log => {
+                "j/k: Scroll   Enter: Expand   g/G: Top/Follow   PgUp/PgDn   (mouse: click/scroll)"
+                    .to_string()
+            }
+        },
+    };
+    if job_running {
+        format!("{body}   Ctrl+C: Cancel")
+    } else {
+        body
     }
 }
 
@@ -169,5 +227,93 @@ mod tests {
         assert_eq!(s, "F1:Help  F");
         assert!(s.starts_with("F1:Help"));
         assert_eq!(s.width(), 10);
+    }
+
+    #[test]
+    fn livegate_footer_hides_enter_until_the_word_matches() {
+        let unmatched = footer_line_raw(
+            140,
+            FocusPane::Tree,
+            ModalChrome::LiveGate {
+                expected: "live",
+                matched: false,
+            },
+            false,
+        );
+        assert!(unmatched.contains("type live"), "{unmatched}");
+        assert!(
+            unmatched.contains("Enter runs only when it matches"),
+            "{unmatched}"
+        );
+        assert!(unmatched.contains("Esc: Cancel"), "{unmatched}");
+        assert!(!unmatched.contains("Enter: Confirm"), "{unmatched}");
+        assert!(!unmatched.contains("Enter: Run"), "{unmatched}");
+        assert!(!unmatched.contains("click outside"), "{unmatched}");
+        assert!(!unmatched.contains("F1"), "{unmatched}");
+
+        let matched = footer_line_raw(
+            140,
+            FocusPane::Preview,
+            ModalChrome::LiveGate {
+                expected: "database",
+                matched: true,
+            },
+            false,
+        );
+        assert!(matched.contains("Enter: Run"), "{matched}");
+        assert!(!matched.contains("Enter: Confirm"), "{matched}");
+        assert!(!matched.contains("type database"), "{matched}");
+    }
+
+    #[test]
+    fn livegate_footer_reads_the_open_modal() {
+        let mut state = demo_state();
+        state.modal = Some(crate::state::Modal::LiveGate {
+            plan: gate_plan(),
+            expected: "live".into(),
+            typed: "li".into(),
+        });
+        let line = footer_line(140, &state);
+        assert!(line.contains("type live"), "{line}");
+        assert!(!line.contains("Enter: Confirm"), "{line}");
+
+        state.modal = Some(crate::state::Modal::LiveGate {
+            plan: gate_plan(),
+            expected: "live".into(),
+            typed: "live".into(),
+        });
+        let ready = footer_line(140, &state);
+        assert!(ready.contains("Enter: Run"), "{ready}");
+    }
+
+    fn demo_state() -> AppState {
+        let dir = std::env::temp_dir().join(format!("dd_pantheon_footer_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        AppState::from_demo(
+            crate::theme::Theme::default(),
+            crate::config::ConfigStore::load(&dir),
+            crate::fixtures::demo_data(),
+        )
+    }
+
+    fn gate_plan() -> crate::plan::CommandPlan {
+        crate::plan::CommandPlan {
+            tool: crate::plan::ToolKind::Terminus,
+            binary: std::path::PathBuf::from("terminus"),
+            argv: vec!["env:deploy".into(), "acme-wp.live".into()],
+            cwd: None,
+            why: "deploy code to acme-wp.live".into(),
+            safety: crate::plan::SafetyTier::LiveGate,
+            target: crate::plan::PlanTarget::Env {
+                site: "acme-wp".into(),
+                env: "live".into(),
+            },
+            dry_run: false,
+            timeout: None,
+            expects_json: false,
+            extra_env: Vec::new(),
+            redact: Vec::new(),
+            confirm_with_yes: true,
+        }
     }
 }
