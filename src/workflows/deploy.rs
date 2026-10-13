@@ -446,15 +446,28 @@ pub fn stage_after_diffstat(
         }
     }
     let branch = git_branch(state, site);
+    if !crate::tools::git::safe_branch_name(&branch) {
+        state.show_toast(
+            ToastLevel::Warning,
+            format!("refusing git branch `{branch}`"),
+        );
+        return false;
+    }
     match local_path(state, site) {
         Some(path) if state.tools.git.is_some() || state.demo => {
-            steps.push(crate::tools::git::plan_push(
+            match crate::tools::git::plan_push(
                 state.tools.git_path(),
                 path,
                 "origin",
                 &branch,
                 Some(site.to_string()),
-            ));
+            ) {
+                Ok(plan) => steps.push(plan),
+                Err(msg) => {
+                    state.show_toast(ToastLevel::Warning, msg);
+                    return false;
+                }
+            }
             steps.push(plan_wait(state.tools.terminus_path(), site, env));
         }
         Some(_) => {

@@ -350,6 +350,17 @@ pub fn submit(state: &mut AppState, form: SiteCreateForm) {
         state.modal = Some(Modal::SiteCreate { form });
         return;
     }
+    if form.bind_local {
+        let branch = crate::workflows::deploy::git_branch(state, &name);
+        if !crate::tools::git::safe_branch_name(&branch) {
+            state.show_toast(
+                ToastLevel::Warning,
+                format!("refusing git branch `{branch}`"),
+            );
+            state.modal = Some(Modal::SiteCreate { form });
+            return;
+        }
+    }
     let create = plan_create(
         state.tools.terminus_path(),
         &name,

@@ -36,9 +36,7 @@ fn demo_dev_stages_git_push_and_wait() {
     app.handle_key(key(KeyCode::Char('e'))).unwrap();
     match app.state.current.as_ref() {
         Some(StagedPlan::Workflow { plan, .. }) => {
-            assert_eq!(plan.steps[0].argv[0], "push");
-            assert_eq!(plan.steps[0].argv[1], "origin");
-            assert_eq!(plan.steps[0].argv[2], "master");
+            assert_eq!(plan.steps[0].argv, vec!["push", "--", "origin", "master"]);
             assert!(plan.steps[0].cwd.is_some());
             assert!(!plan.steps[0].dry_run);
             assert_eq!(plan.steps[1].argv[0], "workflow:wait");
@@ -67,6 +65,33 @@ fn demo_sftp_env_stages_connection_set() {
         }
         other => panic!("expected connection:set workflow, got {other:?}"),
     }
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn unsafe_git_branch_does_not_stage_push() {
+    let (mut app, root) = demo_app();
+    let site = app
+        .state
+        .sites
+        .iter_mut()
+        .find(|s| s.name == "acme-wp")
+        .expect("acme-wp");
+    site.overlay.get_or_insert_with(Default::default).git_branch = Some("--force".into());
+    app.state.current = None;
+    assert!(!deploy::stage_after_diffstat(
+        &mut app.state,
+        "acme-wp",
+        "dev",
+        vec![]
+    ));
+    assert!(app.state.current.is_none());
+    let toast = app.state.toast.as_ref().expect("toast");
+    assert!(
+        toast.message.contains("refusing git branch"),
+        "{}",
+        toast.message
+    );
     let _ = fs::remove_dir_all(root);
 }
 
