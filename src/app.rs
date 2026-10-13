@@ -267,7 +267,7 @@ fn apply_event(state: &mut AppState, ev: JobEvent) {
         } => {
             let (
                 kind,
-                stdout,
+                mut stdout,
                 plan_safety,
                 slot,
                 expects_json,
@@ -449,7 +449,43 @@ fn apply_event(state: &mut AppState, ev: JobEvent) {
                 }
                 _ => {}
             }
+            scrub_retained_secrets(state, id, &mut stdout);
         }
+    }
+}
+
+fn scrub_retained_secrets(state: &mut AppState, id: crate::jobs::JobId, stdout: &mut String) {
+    let identity = state.jobs.get(&id).map(|job| {
+        (
+            job.plan.binary.clone(),
+            job.plan.argv.clone(),
+            job.plan.cwd.clone(),
+        )
+    });
+    if let Some((binary, mut argv, cwd)) = identity {
+        scrub_staged_if_same(state.current.as_mut(), &binary, &argv, &cwd);
+        scrub_staged_if_same(state.pending_workflow.as_mut(), &binary, &argv, &cwd);
+        for arg in &mut argv {
+            crate::plan::wipe_secret(arg);
+        }
+    }
+    if let Some(job) = state.jobs.get_mut(&id) {
+        crate::jobs::scrub_finished_job(job);
+    }
+    crate::plan::wipe_secret(stdout);
+}
+
+fn scrub_staged_if_same(
+    staged: Option<&mut StagedPlan>,
+    binary: &Path,
+    argv: &[String],
+    cwd: &Option<PathBuf>,
+) {
+    let Some(plan) = staged.and_then(StagedPlan::current_mut) else {
+        return;
+    };
+    if plan.binary.as_path() == binary && plan.argv == argv && plan.cwd == *cwd {
+        plan.scrub_secrets();
     }
 }
 
@@ -627,5 +663,78 @@ mod tests {
         let wait = app.next_poll_timeout().expect("toast wake");
         assert!(wait <= crate::toast::TOAST_DURATION);
         assert!(wait > Duration::ZERO);
+    }
+
+    #[test]
+    fn login_job_scrubs_staged_copy_and_finished_output() {
+        let mut app = demo();
+        let token = "super-secret-token";
+        let plan = crate::workflows::auth::plan_login(std::path::PathBuf::from("/bin/echo"), token);
+        let later = crate::workflows::auth::plan_login(
+            std::path::PathBuf::from("/bin/true"),
+            "other-secret-token",
+        );
+        app.state.current = Some(StagedPlan::Workflow {
+            plan: crate::plan::WorkflowPlan {
+                title: "login".into(),
+                why: "login".into(),
+                safety: plan.safety,
+                steps: vec![plan.clone(), later],
+                stop_on_failure: true,
+            },
+            step: 0,
+        });
+        app.state.pending_workflow = app.state.current.clone();
+        crate::workflows::start_job(&mut app.state, plan, crate::jobs::JobKind::User);
+        let staged = app.state.current.as_ref().expect("staged");
+        let StagedPlan::Workflow { plan: steps, .. } = staged else {
+            panic!("workflow");
+        };
+        assert!(
+            !steps.steps[0].argv.iter().any(|a| a.contains(token)),
+            "staged step was scrubbed after spawn"
+        );
+        assert!(
+            steps.steps[1]
+                .argv
+                .iter()
+                .any(|a| a.contains("other-secret-token")),
+            "a later step still has to run"
+        );
+        let running = app
+            .state
+            .jobs
+            .values()
+            .find(|job| job.plan.binary == std::path::PathBuf::from("/bin/echo"))
+            .expect("echo job");
+        assert!(
+            running.plan.argv.iter().any(|a| a.contains(token)),
+            "the running job keeps the token so output can be redacted"
+        );
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while std::time::Instant::now() < deadline {
+            app.tick();
+            if app.state.jobs.values().all(|job| !job.status.is_live()) {
+                app.tick();
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let echo = app
+            .state
+            .jobs
+            .values()
+            .find(|job| job.plan.binary == std::path::PathBuf::from("/bin/echo"))
+            .expect("echo job");
+        assert!(!echo.status.is_live(), "{:?}", echo.status);
+        assert!(!echo.plan.argv.iter().any(|arg| arg.contains(token)));
+        assert!(!echo.stdout_raw.contains(token), "{}", echo.stdout_raw);
+        assert!(!echo.log.text().contains(token), "{}", echo.log.text());
+        assert!(
+            !app.state.log_lines.iter().any(|line| line.contains(token)),
+            "{:?}",
+            app.state.log_lines
+        );
     }
 }
