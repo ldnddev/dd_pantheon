@@ -106,12 +106,14 @@ detect_target() {
   esac
 }
 
+# Tags must be vMAJOR.MINOR.PATCH with an optional prerelease suffix.
+# The old glob (v[0-9]*.[0-9]*.[0-9]*) also matched v1.2.3/../evil and shell metacharacters.
 is_release_tag() {
-  case "$1" in
-    v[0-9]*.[0-9]*.[0-9]*) return 0 ;;
-    v[0-9]*.[0-9]*) return 0 ;;
-    *) return 1 ;;
-  esac
+  printf '%s\n' "$1" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9]+)*$'
+}
+
+is_github_repo() {
+  printf '%s\n' "$1" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'
 }
 
 normalize_tag() {
@@ -309,9 +311,58 @@ install_binary() {
   info "installed ${INSTALL_DIR}/${APP_NAME}"
 }
 
+# Reject absolute paths, ".." segments, and link members before extract.
+# GNU tar 1.35 blocks ".." on extract but still writes symlinks; older tar and bsdtar differ.
+assert_archive_members_safe() {
+  local archive="$1"
+  local listing name type
+  listing="$(mktemp)"
+  tar -tzf "$archive" >"$listing"
+  while IFS= read -r name || [ -n "$name" ]; do
+    [ -n "$name" ] || continue
+    name="${name#./}"
+    case "$name" in
+      /*|*\\*)
+        rm -f "$listing"
+        fail "archive member is absolute: ${name}"
+        ;;
+    esac
+    local rest="${name%/}" seg
+    rest="${rest#./}"
+    while [ -n "$rest" ]; do
+      seg="${rest%%/*}"
+      if [ "$seg" = ".." ]; then
+        rm -f "$listing"
+        fail "archive member escapes the install directory: ${name}"
+      fi
+      case "$rest" in
+        */*) rest="${rest#*/}" ;;
+        *) rest="" ;;
+      esac
+    done
+  done <"$listing"
+  rm -f "$listing"
+
+  listing="$(mktemp)"
+  tar -tvzf "$archive" >"$listing"
+  while IFS= read -r name || [ -n "$name" ]; do
+    [ -n "$name" ] || continue
+    type="${name:0:1}"
+    case "$type" in
+      - | d) ;;
+      *)
+        rm -f "$listing"
+        fail "archive member is not a regular file or directory: ${name}"
+        ;;
+    esac
+  done <"$listing"
+  rm -f "$listing"
+}
+
 install_from_release() {
   command -v tar >/dev/null 2>&1 || fail "tar is required to unpack the package"
   command -v install >/dev/null 2>&1 || fail "install(1) was not found."
+  is_github_repo "$REPO" || fail "DD_PANTHEON_REPO must look like owner/name (got ${REPO})"
 
   local tag
   tag="$(normalize_tag "$VERSION")"
@@ -320,6 +371,9 @@ install_from_release() {
   fi
   if [ "$(uname -s)" = Linux ] && { [ -f /etc/alpine-release ] || ldd /bin/sh 2>&1 | grep -qi musl; }; then
     info "warning: this looks like musl libc; published packages are glibc. Use --from-source on Alpine."
+  fi
+  if ! is_release_tag "$tag"; then
+    fail "refusing version '${tag}' (expected vX.Y.Z from a GitHub Release)"
   fi
   info "installing ${APP_NAME} ${tag} for ${TARGET}"
 
@@ -336,21 +390,25 @@ install_from_release() {
   fi
 
   local sumfile="$INSTALL_WORKDIR/${asset}.sha256"
-  if http_get "${url}.sha256" "$sumfile" 2>/dev/null; then
-    local expect got
-    expect="$(awk '{print $1}' "$sumfile" | head -n1)"
-    got="$(sha256_of "$INSTALL_WORKDIR/$asset")"
-    [ -n "$expect" ] || fail "checksum file for ${asset} was empty"
-    if [ "$expect" != "$got" ]; then
-      fail "SHA-256 mismatch for ${asset} (expected ${expect}, got ${got})"
-    fi
-    info "checksum ok"
-  else
-    info "no ${asset}.sha256 attached to the release — skipping verify"
+  if ! http_get "${url}.sha256" "$sumfile"; then
+    fail "release ${tag} has no ${asset}.sha256 — refusing to install an unverified package"
   fi
+  local expect got
+  expect="$(awk '{print $1}' "$sumfile" | head -n1 | tr 'A-F' 'a-f')"
+  got="$(sha256_of "$INSTALL_WORKDIR/$asset" | tr 'A-F' 'a-f')"
+  printf '%s\n' "$expect" | grep -Eq '^[0-9a-f]{64}$' || fail "checksum file for ${asset} is not a SHA-256 digest"
+  if [ "$expect" != "$got" ]; then
+    fail "SHA-256 mismatch for ${asset} (expected ${expect}, got ${got})"
+  fi
+  info "checksum ok"
 
   gzip -t "$INSTALL_WORKDIR/$asset" 2>/dev/null || fail "download was not a gzip archive (wrong asset or HTML error page)"
-  tar -xzf "$INSTALL_WORKDIR/$asset" -C "$INSTALL_WORKDIR"
+  assert_archive_members_safe "$INSTALL_WORKDIR/$asset"
+  if tar --help 2>/dev/null | grep -q -- '--no-same-owner'; then
+    tar --no-same-owner -xzf "$INSTALL_WORKDIR/$asset" -C "$INSTALL_WORKDIR"
+  else
+    tar -xzf "$INSTALL_WORKDIR/$asset" -C "$INSTALL_WORKDIR"
+  fi
 
   local bin theme
   bin="$(find_in_tree "$INSTALL_WORKDIR" "$APP_NAME")"
