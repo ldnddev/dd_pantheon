@@ -46,7 +46,15 @@ fn local_running(state: &AppState) -> bool {
 
 pub fn cms_safety(command: &str) -> SafetyTier {
     let n = command.to_ascii_lowercase();
-    if n.contains("sql-drop") || n.contains("site-install") {
+    const DESTRUCTIVE: &[&str] = &[
+        "sql-drop",
+        "sql:drop",
+        "site-install",
+        "site:install",
+        "db reset",
+        "db drop",
+    ];
+    if DESTRUCTIVE.iter().any(|needle| n.contains(needle)) {
         SafetyTier::Destructive
     } else {
         SafetyTier::Mutating
@@ -180,7 +188,10 @@ mod tests {
     #[test]
     fn wipe_class_cms_is_destructive() {
         assert_eq!(cms_safety("sql-drop"), SafetyTier::Destructive);
+        assert_eq!(cms_safety("sql:drop"), SafetyTier::Destructive);
         assert_eq!(cms_safety("site-install standard"), SafetyTier::Destructive);
+        assert_eq!(cms_safety("site:install"), SafetyTier::Destructive);
+        assert_eq!(cms_safety("db reset --yes"), SafetyTier::Destructive);
         assert_eq!(cms_safety("plugin list"), SafetyTier::Mutating);
         assert_eq!(cms_safety("sql:cli"), SafetyTier::Mutating);
     }

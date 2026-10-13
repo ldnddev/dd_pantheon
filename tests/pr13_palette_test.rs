@@ -2,6 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use dd_pantheon::app::App;
 use dd_pantheon::config::{looks_like_machine_token, push_history};
 use dd_pantheon::plan::{SafetyTier, StagedPlan};
+use dd_pantheon::safety::live_gate_word;
 use dd_pantheon::state::{CmsKind, CmsTarget, Modal, TreeSel};
 use dd_pantheon::workflows::palette::{
     PaletteArgs, RAW_PALETTE_WARNING, lando_command_enabled, subsequence_match,
@@ -45,6 +46,99 @@ fn plan_from_catalog_lando_pull_is_destructive() {
     assert_eq!(plan.argv[0], "pull");
     assert_eq!(plan.safety, SafetyTier::Destructive);
     assert!(plan.cwd.is_some());
+    let _ = fs::remove_dir_all(root);
+}
+
+fn palette_extra(args: &[&str]) -> PaletteArgs {
+    PaletteArgs {
+        extra: args.iter().map(|s| (*s).to_string()).collect(),
+        ..PaletteArgs::default()
+    }
+}
+
+#[test]
+fn lando_push_database_live_is_livegate_database() {
+    let (app, root) = demo_app();
+    let staged = plan_from_catalog(
+        &app.state,
+        "lando push",
+        &palette_extra(&["--database=live"]),
+    )
+    .expect("plan");
+    let plan = staged.current().expect("current");
+    assert_eq!(plan.safety, SafetyTier::LiveGate);
+    assert_eq!(live_gate_word(plan), Some("database"));
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn lando_push_code_live_is_livegate_live() {
+    let (app, root) = demo_app();
+    let staged = plan_from_catalog(
+        &app.state,
+        "lando push",
+        &palette_extra(&["--code=live", "--database=none"]),
+    )
+    .expect("plan");
+    let plan = staged.current().expect("current");
+    assert_eq!(plan.safety, SafetyTier::LiveGate);
+    assert_eq!(live_gate_word(plan), Some("live"));
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn lando_push_code_dev_stays_mutating() {
+    let (app, root) = demo_app();
+    let staged = plan_from_catalog(
+        &app.state,
+        "lando push",
+        &palette_extra(&["--code=dev", "--database=none"]),
+    )
+    .expect("plan");
+    let plan = staged.current().expect("current");
+    assert_eq!(plan.safety, SafetyTier::Mutating);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn lando_pull_from_live_stays_destructive() {
+    let (app, root) = demo_app();
+    let staged = plan_from_catalog(
+        &app.state,
+        "lando pull",
+        &palette_extra(&["--database=live"]),
+    )
+    .expect("plan");
+    let plan = staged.current().expect("current");
+    assert_eq!(plan.safety, SafetyTier::Destructive);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn lando_terminus_deploy_live_env_is_livegate() {
+    let (app, root) = demo_app();
+    let staged = plan_from_catalog(
+        &app.state,
+        "lando terminus",
+        &palette_extra(&["env:deploy", "acme.live"]),
+    )
+    .expect("plan");
+    let plan = staged.current().expect("current");
+    assert_eq!(plan.safety, SafetyTier::LiveGate);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn lando_terminus_env_info_live_is_not_livegate() {
+    let (app, root) = demo_app();
+    let staged = plan_from_catalog(
+        &app.state,
+        "lando terminus",
+        &palette_extra(&["env:info", "acme.live"]),
+    )
+    .expect("plan");
+    let plan = staged.current().expect("current");
+    assert_ne!(plan.safety, SafetyTier::LiveGate);
     let _ = fs::remove_dir_all(root);
 }
 
@@ -257,6 +351,9 @@ fn cms_sql_drop_is_destructive_and_does_not_put_yes_after_ddash() {
     let (app, root) = demo_app();
     let plan = cms::plan_cms(&app.state, CmsTarget::Remote, CmsKind::Wp, "sql-drop").expect("plan");
     assert_eq!(plan.safety, SafetyTier::Destructive);
+    let colon =
+        cms::plan_cms(&app.state, CmsTarget::Remote, CmsKind::Drush, "sql:drop").expect("plan");
+    assert_eq!(colon.safety, SafetyTier::Destructive);
     assert_eq!(plan.argv[0], "remote:wp");
     let argv = plan.effective_argv();
     let ddash = argv.iter().position(|a| a == "--").expect("--");

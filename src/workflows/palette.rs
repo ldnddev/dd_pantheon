@@ -446,6 +446,80 @@ fn err(msg: impl Into<String>) -> CatalogError {
     CatalogError::Message(msg.into())
 }
 
+/// Lando `--database` (any dest except `none`) or code/files aimed at live.
+fn lando_push_needs_live_gate(argv: &[String]) -> bool {
+    if !argv.iter().any(|a| a == "push") {
+        return false;
+    }
+    push_flag_on(argv, "--database")
+        || push_flag_eq(argv, "--code", "live")
+        || push_flag_eq(argv, "--files", "live")
+}
+
+/// Bare `--database` includes the database. `--database=none` does not.
+fn push_flag_on(argv: &[String], flag: &str) -> bool {
+    let prefix = format!("{flag}=");
+    argv.iter().enumerate().any(|(i, arg)| {
+        if let Some(value) = arg.strip_prefix(&prefix) {
+            return !value.is_empty() && value != "none";
+        }
+        if arg == flag {
+            match argv.get(i + 1) {
+                Some(next) if !next.starts_with('-') => next != "none",
+                _ => true,
+            }
+        } else {
+            false
+        }
+    })
+}
+
+fn push_flag_eq(argv: &[String], flag: &str, want: &str) -> bool {
+    let prefix = format!("{flag}=");
+    argv.iter().enumerate().any(|(i, arg)| {
+        if let Some(value) = arg.strip_prefix(&prefix) {
+            value == want
+        } else {
+            arg == flag && argv.get(i + 1).is_some_and(|next| next == want)
+        }
+    })
+}
+
+fn mentions_live_env(argv: &[String]) -> bool {
+    argv.iter().any(|arg| {
+        if arg.starts_with('-') {
+            return false;
+        }
+        match arg.rsplit_once('.') {
+            Some((site, "live")) => !site.is_empty() && !site.contains('/') && !site.contains(' '),
+            _ => false,
+        }
+    })
+}
+
+fn high_risk_live_command(name: &str, argv: &[String]) -> bool {
+    const RISKS: &[&str] = &[
+        "deploy",
+        "wipe",
+        "clone-content",
+        "restore",
+        "db-import",
+        "sql-drop",
+        "sql:drop",
+        "site-install",
+        "site:install",
+    ];
+    let mut hay = name.to_ascii_lowercase();
+    for arg in argv {
+        if arg.starts_with('-') {
+            continue;
+        }
+        hay.push(' ');
+        hay.push_str(&arg.to_ascii_lowercase());
+    }
+    RISKS.iter().any(|needle| hay.contains(needle))
+}
+
 fn require_site_env(
     state: &AppState,
     args: &PaletteArgs,
@@ -548,12 +622,16 @@ fn generic_plan(
         (PlanTarget::None, None)
     };
 
-    if tool == ToolKind::Terminus
-        && target.is_live()
-        && safety >= SafetyTier::Mutating
-        && safety != SafetyTier::ReadOnly
-    {
-        safety = SafetyTier::LiveGate;
+    if safety >= SafetyTier::Mutating && safety != SafetyTier::ReadOnly {
+        // Terminus on the selected live env already requires the typed word.
+        // Lando push and a live site.env buried in palette argv do not, so a
+        // single Enter could deploy or overwrite production.
+        if (tool == ToolKind::Terminus && target.is_live())
+            || lando_push_needs_live_gate(&argv)
+            || (mentions_live_env(&argv) && high_risk_live_command(name, &argv))
+        {
+            safety = SafetyTier::LiveGate;
+        }
     }
 
     let confirm = safety >= SafetyTier::Mutating;
@@ -587,6 +665,58 @@ pub fn matches_for<'a>(state: &'a AppState, query: &str) -> Vec<&'a CatalogEntry
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lando_push_flags_gate_database_and_live_targets() {
+        assert!(lando_push_needs_live_gate(&[
+            "push".into(),
+            "--database=live".into()
+        ]));
+        assert!(lando_push_needs_live_gate(&[
+            "push".into(),
+            "--database".into(),
+            "dev".into()
+        ]));
+        assert!(!lando_push_needs_live_gate(&[
+            "push".into(),
+            "--database".into(),
+            "none".into()
+        ]));
+        assert!(lando_push_needs_live_gate(&[
+            "push".into(),
+            "--code=live".into(),
+            "--database=none".into()
+        ]));
+        assert!(!lando_push_needs_live_gate(&[
+            "push".into(),
+            "--code=dev".into(),
+            "--database=none".into()
+        ]));
+        assert!(!lando_push_needs_live_gate(&[
+            "pull".into(),
+            "--database=live".into()
+        ]));
+        assert!(mentions_live_env(&["acme.live".into()]));
+        assert!(!mentions_live_env(&["--note=acme.live".into()]));
+        assert!(!mentions_live_env(&["acme.live/files".into()]));
+        assert!(!mentions_live_env(&[".live".into()]));
+        assert!(high_risk_live_command(
+            "lando terminus",
+            &["terminus".into(), "env:deploy".into(), "acme.live".into()]
+        ));
+        assert!(!high_risk_live_command(
+            "lando terminus",
+            &["terminus".into(), "env:info".into(), "acme.live".into()]
+        ));
+        assert!(!high_risk_live_command(
+            "lando terminus",
+            &[
+                "terminus".into(),
+                "env:clear-cache".into(),
+                "acme.live".into()
+            ]
+        ));
+    }
 
     #[test]
     fn subsequence_is_in_order_case_insensitive() {
