@@ -147,6 +147,43 @@ impl CommandPlan {
     pub fn redact_text(&self, text: &str) -> String {
         redact_text(text, &self.redact)
     }
+
+    /// Drop secret values after the child has its own copy of the argv.
+    /// Flag names stay so later output can still be redacted.
+    pub fn scrub_secrets(&mut self) {
+        let rules = self.redact.clone();
+        self.argv = redact_argv(&self.argv, &rules);
+        for rule in &mut self.redact {
+            if let Redact::Exact(secret) = rule {
+                wipe_secret(secret);
+            }
+        }
+        self.redact.retain(|rule| match rule {
+            Redact::Exact(secret) => !secret.is_empty(),
+            Redact::FlagValue { .. } => true,
+        });
+        for (key, value) in &mut self.extra_env {
+            let key = key.to_ascii_lowercase();
+            if key.contains("token") || key.contains("secret") || key.contains("password") {
+                wipe_secret(value);
+            }
+        }
+    }
+}
+
+pub fn same_command(a: &CommandPlan, b: &CommandPlan) -> bool {
+    a.binary == b.binary && a.argv == b.argv && a.cwd == b.cwd
+}
+
+/// Overwrite a secret in place, then drop the length. `clear` alone leaves
+/// the bytes in the allocation.
+pub fn wipe_secret(buf: &mut String) {
+    if buf.is_empty() {
+        return;
+    }
+    let stars = "*".repeat(buf.len());
+    buf.replace_range(.., &stars);
+    buf.clear();
 }
 
 #[derive(Clone, Debug)]
@@ -187,6 +224,13 @@ impl StagedPlan {
         match self {
             Self::One(p) => Some(p),
             Self::Workflow { plan, step } => plan.steps.get(*step),
+        }
+    }
+
+    pub fn current_mut(&mut self) -> Option<&mut CommandPlan> {
+        match self {
+            Self::One(p) => Some(p),
+            Self::Workflow { plan, step } => plan.steps.get_mut(*step),
         }
     }
 
@@ -260,13 +304,26 @@ pub fn redact_text(text: &str, rules: &[Redact]) -> String {
             }
             Redact::FlagValue { flag } => {
                 let prefix = format!("{flag}=");
-                if let Some(idx) = out.find(&prefix) {
-                    let rest = &out[idx + prefix.len()..];
+                let mut search_from = 0;
+                while search_from < out.len() {
+                    let Some(rel) = out[search_from..].find(&prefix) else {
+                        break;
+                    };
+                    let idx = search_from + rel;
+                    let value_start = idx + prefix.len();
+                    let rest = &out[value_start..];
                     let end = rest.find(|c: char| c.is_whitespace()).unwrap_or(rest.len());
-                    let value = &rest[..end];
-                    if !value.is_empty() {
-                        out = out.replace(&format!("{prefix}{value}"), &format!("{flag}=***"));
+                    if end == 0 {
+                        search_from = value_start;
+                        continue;
                     }
+                    if &rest[..end] == "***" {
+                        search_from = value_start + end;
+                        continue;
+                    }
+                    let replacement = format!("{flag}=***");
+                    out.replace_range(idx..value_start + end, &replacement);
+                    search_from = idx + replacement.len();
                 }
             }
             _ => {}
@@ -377,5 +434,60 @@ mod tests {
         let line = plan.redacted_shell_line();
         assert!(line.contains("--machine-token=***"));
         assert!(!line.contains("super-secret"));
+    }
+
+    #[test]
+    fn redact_text_replaces_every_flag_value() {
+        let rules = vec![Redact::FlagValue {
+            flag: "--machine-token".into(),
+        }];
+        let text = "auth:login --machine-token=aaa --machine-token=bbb";
+        let once = redact_text(text, &rules);
+        assert_eq!(once, "auth:login --machine-token=*** --machine-token=***");
+        assert_eq!(redact_text(&once, &rules), once);
+    }
+
+    #[test]
+    fn scrub_secrets_clears_argv_exact_and_env() {
+        let mut plan = CommandPlan {
+            tool: ToolKind::Terminus,
+            binary: PathBuf::from("terminus"),
+            argv: vec![
+                "auth:login".into(),
+                "--machine-token=s3cret".into(),
+                "s3cret".into(),
+            ],
+            cwd: None,
+            why: "login".into(),
+            safety: SafetyTier::Mutating,
+            target: PlanTarget::None,
+            dry_run: true,
+            timeout: None,
+            expects_json: false,
+            extra_env: vec![
+                ("TERMINUS_MACHINE_TOKEN".into(), "s3cret".into()),
+                ("PATH".into(), "/usr/bin".into()),
+            ],
+            redact: vec![
+                Redact::FlagValue {
+                    flag: "--machine-token".into(),
+                },
+                Redact::Exact("s3cret".into()),
+            ],
+            confirm_with_yes: false,
+        };
+        plan.scrub_secrets();
+        let rendered = format!("{plan:?}");
+        assert!(!rendered.contains("s3cret"), "{rendered}");
+        assert!(plan.argv.iter().any(|a| a == "--machine-token=***"));
+        assert!(plan.argv.iter().any(|a| a == "***"));
+        assert!(plan.redact.iter().all(|rule| matches!(
+            rule,
+            Redact::FlagValue { flag } if flag == "--machine-token"
+        )));
+        assert_eq!(plan.extra_env[0].1, "");
+        assert_eq!(plan.extra_env[1].1, "/usr/bin");
+        plan.scrub_secrets();
+        assert!(!format!("{plan:?}").contains("s3cret"));
     }
 }

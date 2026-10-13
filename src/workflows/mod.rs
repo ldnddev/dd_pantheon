@@ -266,8 +266,35 @@ pub fn start_job(
         kind = ?kind,
         "job start"
     );
+    // Compare before spawn moves `plan`. The job keeps its redact rules until
+    // exit so live output can still hide secrets. Only the staged copy that
+    // was just handed to the child is scrubbed, and only its current step.
+    let scrub_current = state
+        .current
+        .as_ref()
+        .and_then(StagedPlan::current)
+        .is_some_and(|staged| crate::plan::same_command(staged, &plan));
+    let scrub_pending = state
+        .pending_workflow
+        .as_ref()
+        .and_then(StagedPlan::current)
+        .is_some_and(|staged| crate::plan::same_command(staged, &plan));
     match jobs::spawn(state.job_hub.tx.clone(), plan, kind) {
         Ok(job) => {
+            if scrub_current {
+                if let Some(staged) = state.current.as_mut().and_then(StagedPlan::current_mut) {
+                    staged.scrub_secrets();
+                }
+            }
+            if scrub_pending {
+                if let Some(staged) = state
+                    .pending_workflow
+                    .as_mut()
+                    .and_then(StagedPlan::current_mut)
+                {
+                    staged.scrub_secrets();
+                }
+            }
             if mutating {
                 state.mutating_slots.insert(job.plan.target.mutating_slot());
             }

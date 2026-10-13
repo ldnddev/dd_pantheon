@@ -1,5 +1,4 @@
 use crate::plan::StagedPlan;
-use std::fs::OpenOptions;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use tracing_subscriber::EnvFilter;
@@ -22,10 +21,7 @@ pub fn init(debug_log: bool) {
     }
     INIT.get_or_init(|| {
         let path = log_path();
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let Ok(file) = OpenOptions::new().create(true).append(true).open(&path) else {
+        let Ok(file) = crate::config::open_private_append(&path) else {
             return false;
         };
         let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));

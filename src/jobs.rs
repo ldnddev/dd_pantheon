@@ -179,6 +179,14 @@ impl LogBuffer {
         }
     }
 
+    pub fn redact_in_place(&mut self, rules: &[crate::plan::Redact]) {
+        for line in &mut self.lines {
+            *line = crate::plan::redact_text(line, rules);
+        }
+        self.current = crate::plan::redact_text(&self.current, rules);
+        self.bytes = self.lines.iter().map(String::len).sum();
+    }
+
     pub fn text(&self) -> String {
         let mut s = self.lines.iter().cloned().collect::<Vec<_>>().join("\n");
         if !self.current.is_empty() {
@@ -283,6 +291,30 @@ pub fn spawn(tx: SyncSender<JobEvent>, plan: CommandPlan, kind: JobKind) -> Resu
     Ok(job)
 }
 
+/// Redact captured output, then drop secret argv. Call only after callers
+/// have copied `stdout_raw` for JSON and auth parsing.
+pub fn scrub_finished_job(job: &mut Job) {
+    let rules = job.plan.redact.clone();
+    job.stdout_raw = crate::plan::redact_text(&job.stdout_raw, &rules);
+    job.log.redact_in_place(&rules);
+    job.plan.scrub_secrets();
+}
+
+struct ScrubOnDrop(CommandPlan);
+
+impl Drop for ScrubOnDrop {
+    fn drop(&mut self) {
+        self.0.scrub_secrets();
+    }
+}
+
+impl std::ops::Deref for ScrubOnDrop {
+    type Target = CommandPlan;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 pub fn request_cancel(job: &Job) {
     job.cancel.store(true, Ordering::SeqCst);
     let pgid = job.pgid.load(Ordering::SeqCst);
@@ -298,6 +330,7 @@ fn run_job(
     cancel: Arc<AtomicBool>,
     pgid_slot: Arc<AtomicI32>,
 ) {
+    let plan = ScrubOnDrop(plan);
     let mut cmd = build_command(&plan);
     let mut child = match cmd.spawn() {
         Ok(c) => c,

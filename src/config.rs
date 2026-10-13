@@ -2,7 +2,8 @@ use crate::models::{MetricsPeriod, SiteOverlay};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -44,9 +45,32 @@ pub fn looks_like_machine_token(line: &str) -> bool {
     line.to_ascii_lowercase().contains("--machine-token")
 }
 
+/// History lines that would persist a token or password. A bare `secret`
+/// word is not enough: `env:deploy --note=not-a-secret` must be kept.
+pub fn sensitive_history_line(line: &str) -> bool {
+    if looks_like_machine_token(line) {
+        return true;
+    }
+    let lower = line.to_ascii_lowercase();
+    if lower.contains("--password") || lower.contains("password=") {
+        return true;
+    }
+    for token in line.split_whitespace() {
+        let token = token.to_ascii_lowercase();
+        if token == "lock:enable" || token.starts_with("secret:") {
+            return true;
+        }
+    }
+    let mentions_login = line.split_whitespace().any(|token| {
+        let token = token.to_ascii_lowercase();
+        token == "auth:login" || token.starts_with("auth:login")
+    });
+    mentions_login && (lower.contains("token") || lower.contains("machine"))
+}
+
 pub fn push_history(list: &mut Vec<String>, line: impl Into<String>) {
     let line = line.into().trim().to_string();
-    if line.is_empty() || looks_like_machine_token(&line) {
+    if line.is_empty() || sensitive_history_line(&line) {
         return;
     }
     list.retain(|e| e != &line);
@@ -87,7 +111,9 @@ pub struct ConfigStore {
 
 impl ConfigStore {
     pub fn load(dir: &Path) -> Self {
+        let _ = tighten_private_dir(dir);
         let path = dir.join("config.toml");
+        let _ = tighten_private_file(&path);
         let (config, mut load_warning) = if !path.exists() {
             (AppConfig::default(), None)
         } else {
@@ -108,6 +134,7 @@ impl ConfigStore {
             }
         };
         let sites_path = dir.join("sites.toml");
+        let _ = tighten_private_file(&sites_path);
         let sites = match load_sites_file(&sites_path) {
             Ok(map) => map,
             Err(warn) => {
@@ -156,31 +183,16 @@ impl ConfigStore {
     }
 
     pub fn write_now(&self) -> Result<()> {
-        if let Some(parent) = self.path.parent() {
-            fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
-        }
         let body = toml::to_string_pretty(&self.config).context("serialize config.toml")?;
-        let tmp = self.path.with_extension("toml.tmp");
-        fs::write(&tmp, body).with_context(|| format!("write {}", tmp.display()))?;
-        fs::rename(&tmp, &self.path)
-            .with_context(|| format!("rename {} -> {}", tmp.display(), self.path.display()))?;
-        Ok(())
+        write_private_file(&self.path, &body)
     }
 
     pub fn write_sites_now(&self) -> Result<()> {
-        if let Some(parent) = self.sites_path.parent() {
-            fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
-        }
         let file = SitesFile {
             sites: self.sites.clone(),
         };
         let body = toml::to_string_pretty(&file).context("serialize sites.toml")?;
-        let tmp = self.sites_path.with_extension("toml.tmp");
-        fs::write(&tmp, body).with_context(|| format!("write {}", tmp.display()))?;
-        fs::rename(&tmp, &self.sites_path).with_context(|| {
-            format!("rename {} -> {}", tmp.display(), self.sites_path.display())
-        })?;
-        Ok(())
+        write_private_file(&self.sites_path, &body)
     }
 
     /// Persist a bound path: overlay entry → `sites.toml`; else `[locals]`.
@@ -200,6 +212,84 @@ impl ConfigStore {
             self.mark_dirty();
         }
     }
+}
+
+fn write_private_file(path: &Path, body: &str) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+        tighten_private_dir(parent)?;
+    }
+    let tmp = path.with_extension("toml.tmp");
+    write_0600(&tmp, body).with_context(|| format!("write {}", tmp.display()))?;
+    fs::rename(&tmp, path)
+        .with_context(|| format!("rename {} -> {}", tmp.display(), path.display()))?;
+    tighten_private_file(path)?;
+    Ok(())
+}
+
+fn write_0600(path: &Path, body: &str) -> std::io::Result<()> {
+    let mut opts = OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let mut file = opts.open(path)?;
+    file.write_all(body.as_bytes())?;
+    Ok(())
+}
+
+/// `0700` on this directory only. Ancestors such as `~/.config` stay as they are.
+pub(crate) fn tighten_private_dir(path: &Path) -> Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(path)
+            .with_context(|| format!("stat {}", path.display()))?
+            .permissions();
+        perms.set_mode(0o700);
+        fs::set_permissions(path, perms)
+            .with_context(|| format!("chmod 0700 {}", path.display()))?;
+    }
+    Ok(())
+}
+
+pub(crate) fn tighten_private_file(path: &Path) -> Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(path)
+            .with_context(|| format!("stat {}", path.display()))?
+            .permissions();
+        perms.set_mode(0o600);
+        fs::set_permissions(path, perms)
+            .with_context(|| format!("chmod 0600 {}", path.display()))?;
+    }
+    Ok(())
+}
+
+pub(crate) fn open_private_append(path: &Path) -> std::io::Result<std::fs::File> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+        let _ = tighten_private_dir(parent);
+    }
+    let mut opts = OpenOptions::new();
+    opts.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let file = opts.open(path)?;
+    let _ = tighten_private_file(path);
+    Ok(file)
 }
 
 fn load_sites_file(path: &Path) -> Result<HashMap<String, SiteOverlay>, String> {
@@ -237,6 +327,53 @@ mod tests {
         }
         assert_eq!(list.len(), HISTORY_CAP);
         assert_eq!(list[0], "cmd-59");
+    }
+
+    #[test]
+    fn history_drops_secret_and_lock_lines() {
+        let mut list = Vec::new();
+        push_history(&mut list, "secret:site:set acme.live key value");
+        push_history(&mut list, "lock:enable ops hunter2");
+        push_history(&mut list, "env:deploy --note=not-a-secret");
+        push_history(&mut list, "auth:login");
+        push_history(&mut list, "auth:login --token=abc");
+        assert_eq!(
+            list,
+            vec![
+                "auth:login".to_string(),
+                "env:deploy --note=not-a-secret".into(),
+            ]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn config_files_are_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!(
+            "dd_pantheon_mode_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let loose = dir.join("config.toml");
+        fs::write(&loose, "debug_log = false\n").unwrap();
+        fs::set_permissions(&loose, fs::Permissions::from_mode(0o644)).unwrap();
+        let mut store = ConfigStore::load(&dir);
+        store.config.debug_log = true;
+        store.write_now().unwrap();
+        store.write_sites_now().unwrap();
+        let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&store.path), 0o600);
+        assert_eq!(mode(&store.sites_path), 0o600);
+        assert_eq!(mode(&dir), 0o700);
+        fs::set_permissions(&store.path, fs::Permissions::from_mode(0o644)).unwrap();
+        store.write_now().unwrap();
+        assert_eq!(mode(&store.path), 0o600);
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
