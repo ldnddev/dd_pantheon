@@ -242,29 +242,14 @@ fn apply_event(state: &mut AppState, ev: JobEvent) {
             }
         }
         JobEvent::Chunk { id, stream, text } => {
-            if let Some(job) = state.jobs.get_mut(&id) {
-                if stream == Stream::Stdout {
-                    job.stdout_raw.push_str(&text);
-                }
-                let redacted = job.plan.redact_text(&text);
-                job.log.push(&redacted);
-                for line in redacted.lines() {
-                    if !line.is_empty() {
-                        state.log_lines.push(line.to_string());
-                    }
-                }
-                if state.log_lines.len() > 4000 {
-                    let extra = state.log_lines.len() - 4000;
-                    state.log_lines.drain(..extra);
-                }
-                state.snap_log_follow();
-            }
+            append_job_chunk(state, id, stream, &text);
         }
         JobEvent::Exited {
             id,
             status,
             stdout_raw: _,
         } => {
+            flush_job_pending(state, id);
             let (
                 kind,
                 mut stdout,
@@ -452,6 +437,59 @@ fn apply_event(state: &mut AppState, ev: JobEvent) {
             scrub_retained_secrets(state, id, &mut stdout);
         }
     }
+}
+
+fn append_job_chunk(state: &mut AppState, id: crate::jobs::JobId, stream: Stream, text: &str) {
+    let ready = {
+        let Some(job) = state.jobs.get_mut(&id) else {
+            return;
+        };
+        if stream == Stream::Stdout {
+            job.stdout_raw.push_str(text);
+        }
+        match stream {
+            Stream::Stdout => job.stdout_pending.push_chunk(text),
+            Stream::Stderr => job.stderr_pending.push_chunk(text),
+        }
+    };
+    commit_raw_output(state, id, ready);
+}
+
+fn flush_job_pending(state: &mut AppState, id: crate::jobs::JobId) {
+    let (stdout, stderr) = {
+        let Some(job) = state.jobs.get_mut(&id) else {
+            return;
+        };
+        (job.stdout_pending.finish(), job.stderr_pending.finish())
+    };
+    commit_raw_output(state, id, stdout);
+    commit_raw_output(state, id, stderr);
+}
+
+fn commit_raw_output(state: &mut AppState, id: crate::jobs::JobId, mut raw: String) {
+    if raw.is_empty() {
+        return;
+    }
+    let redacted = {
+        let Some(job) = state.jobs.get_mut(&id) else {
+            crate::plan::wipe_secret(&mut raw);
+            return;
+        };
+        let redacted = job.plan.redact_text(&raw);
+        job.log.push(&redacted);
+        redacted
+    };
+    crate::plan::wipe_secret(&mut raw);
+    for line in redacted.lines() {
+        if !line.is_empty() {
+            state.log_lines.push(line.to_string());
+        }
+    }
+    if state.log_lines.len() > 4000 {
+        let extra = state.log_lines.len() - 4000;
+        state.log_lines.drain(..extra);
+    }
+    state.snap_log_follow();
 }
 
 fn scrub_retained_secrets(state: &mut AppState, id: crate::jobs::JobId, stdout: &mut String) {
@@ -733,6 +771,67 @@ mod tests {
         assert!(!echo.log.text().contains(token), "{}", echo.log.text());
         assert!(
             !app.state.log_lines.iter().any(|line| line.contains(token)),
+            "{:?}",
+            app.state.log_lines
+        );
+    }
+
+    #[test]
+    fn split_chunks_redact_before_the_log_line_is_shown() {
+        use crate::jobs::{Job, JobId, JobKind, JobStatus, LineHold, LogBuffer};
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, AtomicI32};
+
+        let mut app = demo();
+        let token = "super-secret-token";
+        let plan = crate::workflows::auth::plan_login(std::path::PathBuf::from("/bin/echo"), token);
+        let id = JobId::new();
+        app.state.jobs.insert(
+            id,
+            Job {
+                id,
+                kind: JobKind::User,
+                plan,
+                status: JobStatus::Running { pid: 1, pgid: 1 },
+                started_at: std::time::Instant::now(),
+                log: LogBuffer::default(),
+                stdout_raw: String::new(),
+                stdout_pending: LineHold::default(),
+                stderr_pending: LineHold::default(),
+                json: None,
+                cancel: Arc::new(AtomicBool::new(false)),
+                pgid: Arc::new(AtomicI32::new(0)),
+            },
+        );
+        app.state.log_lines.clear();
+        append_job_chunk(&mut app.state, id, Stream::Stdout, "hello super-se");
+        append_job_chunk(&mut app.state, id, Stream::Stderr, "tail super-se");
+        assert!(
+            app.state.log_lines.is_empty(),
+            "partial output stays buffered: {:?}",
+            app.state.log_lines
+        );
+        append_job_chunk(&mut app.state, id, Stream::Stdout, "cret-token\n");
+        append_job_chunk(&mut app.state, id, Stream::Stderr, "cret-token");
+        flush_job_pending(&mut app.state, id);
+        assert!(
+            app.state
+                .log_lines
+                .iter()
+                .any(|line| line.contains("hello") && line.contains("***")),
+            "{:?}",
+            app.state.log_lines
+        );
+        assert!(
+            app.state
+                .log_lines
+                .iter()
+                .any(|line| line.starts_with("tail ") && line.contains("***")),
+            "{:?}",
+            app.state.log_lines
+        );
+        assert!(
+            app.state.log_lines.iter().all(|line| !line.contains(token)),
             "{:?}",
             app.state.log_lines
         );
