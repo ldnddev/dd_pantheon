@@ -135,6 +135,28 @@ impl JobStatus {
     }
 }
 
+/// Raw output held until a newline, so a secret split across reads is
+/// redacted as one line instead of two fragments.
+#[derive(Clone, Debug, Default)]
+pub struct LineHold {
+    pending: String,
+}
+
+impl LineHold {
+    pub fn push_chunk(&mut self, chunk: &str) -> String {
+        self.pending.push_str(chunk);
+        let mut ready = String::new();
+        while let Some(i) = self.pending.find('\n') {
+            ready.push_str(&self.pending.drain(..=i).collect::<String>());
+        }
+        ready
+    }
+
+    pub fn finish(&mut self) -> String {
+        std::mem::take(&mut self.pending)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct LogBuffer {
     pub lines: VecDeque<String>,
@@ -208,6 +230,8 @@ pub struct Job {
     pub started_at: Instant,
     pub log: LogBuffer,
     pub stdout_raw: String,
+    pub stdout_pending: LineHold,
+    pub stderr_pending: LineHold,
     pub json: Option<serde_json::Value>,
     pub cancel: Arc<AtomicBool>,
     pub pgid: Arc<AtomicI32>,
@@ -280,6 +304,8 @@ pub fn spawn(tx: SyncSender<JobEvent>, plan: CommandPlan, kind: JobKind) -> Resu
         started_at: Instant::now(),
         log: LogBuffer::default(),
         stdout_raw: String::new(),
+        stdout_pending: LineHold::default(),
+        stderr_pending: LineHold::default(),
         json: None,
         cancel: cancel.clone(),
         pgid: pgid.clone(),
@@ -297,7 +323,39 @@ pub fn scrub_finished_job(job: &mut Job) {
     let rules = job.plan.redact.clone();
     job.stdout_raw = crate::plan::redact_text(&job.stdout_raw, &rules);
     job.log.redact_in_place(&rules);
+    if let Some(json) = job.json.as_mut() {
+        redact_json(json, &rules);
+    }
+    let mut leftover = job.stdout_pending.finish();
+    leftover.push_str(&job.stderr_pending.finish());
+    if !leftover.is_empty() {
+        job.log.push(&crate::plan::redact_text(&leftover, &rules));
+        crate::plan::wipe_secret(&mut leftover);
+    }
     job.plan.scrub_secrets();
+}
+
+fn redact_json(value: &mut serde_json::Value, rules: &[crate::plan::Redact]) {
+    match value {
+        serde_json::Value::String(text) => {
+            *text = crate::plan::redact_text(text, rules);
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                redact_json(item, rules);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            let keys: Vec<String> = map.keys().cloned().collect();
+            for key in keys {
+                if let Some(mut child) = map.remove(&key) {
+                    redact_json(&mut child, rules);
+                    map.insert(crate::plan::redact_text(&key, rules), child);
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 struct ScrubOnDrop(CommandPlan);
@@ -560,6 +618,50 @@ mod tests {
     use super::*;
     use crate::plan::{PlanTarget, SafetyTier};
     use std::path::PathBuf;
+
+    #[test]
+    fn line_hold_joins_a_secret_split_across_chunks() {
+        use crate::plan::Redact;
+        let mut hold = LineHold::default();
+        assert!(hold.push_chunk("hello super-se").is_empty());
+        let ready = hold.push_chunk("cret-token\nmore");
+        assert_eq!(ready, "hello super-secret-token\n");
+        let redacted =
+            crate::plan::redact_text(&ready, &[Redact::Exact("super-secret-token".into())]);
+        assert!(!redacted.contains("super-secret-token"), "{redacted}");
+        assert_eq!(hold.finish(), "more");
+    }
+
+    #[test]
+    fn scrub_finished_job_redacts_json_and_pending_output() {
+        use crate::plan::Redact;
+        let mut plan = raw_plan("terminus", &["auth:whoami"]);
+        plan.redact = vec![Redact::Exact("super-secret-token".into())];
+        let mut job = Job {
+            id: JobId::new(),
+            kind: JobKind::User,
+            plan,
+            status: JobStatus::Succeeded { exit: 0 },
+            started_at: Instant::now(),
+            log: LogBuffer::default(),
+            stdout_raw: r#"{"name":"super-secret-token"}"#.into(),
+            stdout_pending: LineHold::default(),
+            stderr_pending: LineHold::default(),
+            json: Some(serde_json::json!({
+                "name": "super-secret-token",
+                "nested": {"super-secret-token": true}
+            })),
+            cancel: Arc::new(AtomicBool::new(false)),
+            pgid: Arc::new(AtomicI32::new(0)),
+        };
+        job.log.push("seen super-secret-token\n");
+        job.stderr_pending.push_chunk("tail super-secret-token");
+        scrub_finished_job(&mut job);
+        let dumped = format!("{} {:?} {}", job.stdout_raw, job.json, job.log.text());
+        assert!(!dumped.contains("super-secret-token"), "{dumped}");
+        assert!(job.stdout_pending.finish().is_empty());
+        assert!(job.stderr_pending.finish().is_empty());
+    }
 
     fn raw_plan(bin: &str, argv: &[&str]) -> CommandPlan {
         CommandPlan {
