@@ -1,10 +1,58 @@
 use crate::state::{AppState, Modal};
 use crate::theme::color_from_rgb;
-use ldnddev_theme::{ThemeEditorRow, theme_editor_rows};
+use ldnddev_theme::{PickerRow, ThemeEditorRow, theme_editor_rows};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
+
+pub fn draw_picker(f: &mut Frame, state: &AppState, area: Rect) {
+    let Some(picker) = &state.theme_picker else {
+        return;
+    };
+    if !matches!(state.modal, Some(Modal::ThemePicker)) {
+        return;
+    }
+    let mut lines = vec![
+        Line::from(format!(
+            "Save: {} (Tab)    Enter apply    e edit colors    s save    Esc revert",
+            picker.save_target.label()
+        )),
+        Line::from(""),
+    ];
+    let view_h = area.height.saturating_sub(5) as usize;
+    for (idx, row) in picker
+        .rows
+        .iter()
+        .enumerate()
+        .skip(picker.scroll)
+        .take(view_h.max(1))
+    {
+        let (label, detail) = match row {
+            PickerRow::Follow { name } => ("Follow desktop".to_string(), name.clone()),
+            PickerRow::Theme(theme) => (theme.name.clone(), theme.mode.label().to_string()),
+            PickerRow::Custom => ("Custom".to_string(), "built-in".to_string()),
+        };
+        let cursor = if idx == picker.selected { ">" } else { " " };
+        let style = if idx == picker.selected {
+            state.theme.selected
+        } else {
+            state.theme.modal_text
+        };
+        lines.push(Line::from(Span::styled(
+            format!("{cursor} {label:<22} {detail}"),
+            style,
+        )));
+    }
+    let text = Paragraph::new(lines).block(
+        Block::default()
+            .title("F2 Themes")
+            .borders(Borders::ALL)
+            .border_style(state.theme.active_border)
+            .style(state.theme.modal),
+    );
+    f.render_widget(text, area);
+}
 
 pub fn draw(f: &mut Frame, state: &AppState, area: Rect) {
     let Some(Modal::ThemeEditor(editor)) = &state.modal else {
@@ -13,9 +61,14 @@ pub fn draw(f: &mut Frame, state: &AppState, area: Rect) {
     let rows = theme_editor_rows(&editor.fields);
     let channel = ["R", "G", "B"][editor.channel.min(2)];
     let target = editor.save_target.label().to_uppercase();
+    let esc = if state.theme_picker.is_some() {
+        "Esc back"
+    } else {
+        "Esc revert"
+    };
     let mut lines: Vec<Line<'_>> = vec![
         Line::from(format!(
-            "Save: {target} (Tab)   Channel: {channel} ([/])   Y save   R reset   Esc revert"
+            "Save: {target} (Tab)   Channel: {channel} ([/])   Y save   R reset   {esc}"
         )),
         Line::from(if editor.editing_hex {
             format!("Hex: {}█   Enter apply   Esc cancel edit", editor.hex_draft)

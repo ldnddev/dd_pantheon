@@ -13,6 +13,7 @@ pub mod safety;
 pub mod state;
 pub mod theme;
 pub mod toast;
+mod toast_chrome;
 pub mod tools;
 pub mod ui;
 pub mod workflows;

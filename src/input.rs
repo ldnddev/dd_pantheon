@@ -55,17 +55,19 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
         )
     );
 
-    if !text_field {
+    if theme_ui_open(state) && key.code == KeyCode::F(2) {
+        close_theme(state, true);
+        return Ok(false);
+    }
+
+    if !text_field && !theme_ui_open(state) {
         match key.code {
             KeyCode::F(1) | KeyCode::Char('?') => {
                 state.modal = Some(Modal::Help { scroll: 0 });
                 return Ok(false);
             }
-            KeyCode::F(2) if !matches!(state.modal, Some(Modal::ThemeEditor(_))) => {
-                state.modal = Some(Modal::ThemeEditor(ldnddev_theme::ThemeEditor::new(
-                    crate::theme::palette_from_theme(&state.theme),
-                    crate::theme::extra_theme_fields(),
-                )));
+            KeyCode::F(2) => {
+                open_theme_ui(state);
                 return Ok(false);
             }
             KeyCode::F(3) => {
@@ -296,6 +298,7 @@ fn handle_modal(state: &mut AppState, key: KeyEvent, modal: Modal) -> Result<boo
             }
             _ => {}
         },
+        Modal::ThemePicker => handle_theme_picker(state, key),
         Modal::ThemeEditor(_) => {
             handle_theme_editor(state, key);
         }
@@ -1559,6 +1562,11 @@ pub fn handle_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
             let down = matches!(mouse.kind, MouseEventKind::ScrollDown);
             if matches!(state.modal, Some(Modal::LogExpand)) {
                 scroll_log(state, if down { 1 } else { -1 });
+            } else if matches!(
+                state.modal,
+                Some(Modal::ThemeEditor(_) | Modal::ThemePicker)
+            ) {
+                scroll_theme(state, if down { 1 } else { -1 });
             } else {
                 match &mut state.modal {
                     Some(Modal::Help { scroll }) | Some(Modal::Doctor { scroll }) => {
@@ -1692,22 +1700,94 @@ fn row_at(area: Rect, y: u16, len: usize) -> Option<usize> {
 }
 
 fn dismiss_modal(state: &mut AppState) {
-    if let Some(Modal::ThemeEditor(editor)) = &mut state.modal {
-        editor.revert();
-        state.theme = crate::theme::theme_from_palette(editor.palette.clone());
+    if theme_ui_open(state) {
+        close_theme(state, true);
+        return;
     }
     state.modal = None;
 }
 
+fn theme_ui_open(state: &AppState) -> bool {
+    matches!(
+        state.modal,
+        Some(Modal::ThemePicker | Modal::ThemeEditor(_))
+    )
+}
+
+fn open_theme_ui(state: &mut AppState) {
+    let palette = crate::theme::palette_from_theme(&state.theme);
+    let picker = ldnddev_theme::ThemePicker::new(
+        palette.clone(),
+        crate::theme::extra_theme_fields(),
+        state.omarchy_paths.clone(),
+    );
+    if picker.lists_omarchy() {
+        state.theme_picker = Some(picker);
+        state.modal = Some(Modal::ThemePicker);
+    } else {
+        state.theme_picker = None;
+        state.modal = Some(Modal::ThemeEditor(ldnddev_theme::ThemeEditor::new(
+            palette,
+            crate::theme::extra_theme_fields(),
+        )));
+    }
+}
+
+fn handle_theme_picker(state: &mut AppState, key: KeyEvent) {
+    let Some(ek) = map_editor_key(key) else {
+        return;
+    };
+    let outcome = {
+        let Some(picker) = state.theme_picker.as_mut() else {
+            return;
+        };
+        picker.handle(ek)
+    };
+    match outcome {
+        ldnddev_theme::PickerOutcome::Applied => {
+            let palette = state
+                .theme_picker
+                .as_ref()
+                .map(|picker| picker.palette.clone());
+            if let Some(palette) = palette {
+                state.theme = crate::theme::theme_from_palette(palette);
+            }
+        }
+        ldnddev_theme::PickerOutcome::EditColors => {
+            let editor = state.theme_picker.as_ref().map(|picker| {
+                let mut editor = ldnddev_theme::ThemeEditor::new(
+                    picker.palette.clone(),
+                    crate::theme::extra_theme_fields(),
+                );
+                editor.save_target = picker.save_target;
+                editor
+            });
+            if let Some(editor) = editor {
+                state.modal = Some(Modal::ThemeEditor(editor));
+            }
+        }
+        ldnddev_theme::PickerOutcome::RequestSave => {
+            let saved = state
+                .theme_picker
+                .as_ref()
+                .map(|picker| (picker.palette.clone(), picker.save_target));
+            if let Some((palette, target)) = saved {
+                let fields = theme_save_fields();
+                if let Err(err) = save_theme_palette(state, &palette, target, &fields) {
+                    state.show_toast(ToastLevel::Error, format!("Save failed: {err}"));
+                }
+            }
+        }
+        ldnddev_theme::PickerOutcome::Error(msg) => {
+            state.show_toast(ToastLevel::Error, msg);
+        }
+        ldnddev_theme::PickerOutcome::Closed { .. } => close_theme(state, true),
+        ldnddev_theme::PickerOutcome::None => {}
+    }
+}
+
 fn handle_theme_editor(state: &mut AppState, key: KeyEvent) {
     let Some(ek) = map_editor_key(key) else {
-        if key.code == KeyCode::F(2) {
-            if let Some(Modal::ThemeEditor(editor)) = &mut state.modal {
-                editor.revert();
-                state.theme = crate::theme::theme_from_palette(editor.palette.clone());
-            }
-            state.modal = None;
-        }
         return;
     };
     let shift = key.modifiers.contains(KeyModifiers::SHIFT);
@@ -1719,26 +1799,116 @@ fn handle_theme_editor(state: &mut AppState, key: KeyEvent) {
     };
     match outcome {
         ldnddev_theme::EditorOutcome::PaletteChanged => {
-            if let Some(Modal::ThemeEditor(editor)) = &state.modal {
-                state.theme = crate::theme::theme_from_palette(editor.palette.clone());
+            let changed = match &state.modal {
+                Some(Modal::ThemeEditor(editor)) => {
+                    Some((editor.palette.clone(), editor.save_target))
+                }
+                _ => None,
+            };
+            if let Some((palette, target)) = changed {
+                if let Some(picker) = state.theme_picker.as_mut() {
+                    picker.palette = palette.clone();
+                    picker.save_target = target;
+                }
+                state.theme = crate::theme::theme_from_palette(palette);
             }
         }
         ldnddev_theme::EditorOutcome::RequestSave => {
-            if let Err(err) = save_theme_editor(state) {
-                state.show_toast(ToastLevel::Error, format!("Save failed: {err}"));
+            let saved = match &state.modal {
+                Some(Modal::ThemeEditor(editor)) => Some((
+                    editor.palette.clone(),
+                    editor.save_target,
+                    editor.fields.clone(),
+                )),
+                _ => None,
+            };
+            if let Some((palette, target, fields)) = saved {
+                if let Err(err) = save_theme_palette(state, &palette, target, &fields) {
+                    state.show_toast(ToastLevel::Error, format!("Save failed: {err}"));
+                }
             }
         }
         ldnddev_theme::EditorOutcome::Closed { .. } => {
-            if let Some(Modal::ThemeEditor(editor)) = &state.modal {
-                state.theme = crate::theme::theme_from_palette(editor.palette.clone());
+            if state.theme_picker.is_some() {
+                let edited = match state.modal.take() {
+                    Some(Modal::ThemeEditor(editor)) => Some((editor.palette, editor.save_target)),
+                    other => {
+                        state.modal = other;
+                        None
+                    }
+                };
+                if let Some((palette, target)) = edited {
+                    if let Some(picker) = state.theme_picker.as_mut() {
+                        picker.palette = palette.clone();
+                        picker.save_target = target;
+                    }
+                    state.theme = crate::theme::theme_from_palette(palette);
+                }
+                state.modal = Some(Modal::ThemePicker);
+            } else {
+                let palette = match state.modal.take() {
+                    Some(Modal::ThemeEditor(editor)) => Some(editor.palette),
+                    other => {
+                        state.modal = other;
+                        None
+                    }
+                };
+                if let Some(palette) = palette {
+                    state.theme = crate::theme::theme_from_palette(palette);
+                }
+                state.theme_picker = None;
             }
-            state.modal = None;
         }
         ldnddev_theme::EditorOutcome::HexError(err) => {
             state.show_toast(ToastLevel::Error, format!("Invalid hex: {err}"));
         }
         ldnddev_theme::EditorOutcome::None => {}
     }
+}
+
+fn scroll_theme(state: &mut AppState, delta: i32) {
+    if let Some(Modal::ThemeEditor(editor)) = state.modal.as_mut() {
+        let next = editor.selected as i32 + delta;
+        editor.select(next.max(0) as usize);
+        return;
+    }
+    if let Some(picker) = state.theme_picker.as_mut() {
+        let next = picker.selected as i32 + delta;
+        picker.select(next.max(0) as usize);
+    }
+}
+
+fn close_theme(state: &mut AppState, revert: bool) {
+    if revert {
+        let reverted = if let Some(picker) = state.theme_picker.as_ref() {
+            Some(picker.revert_palette())
+        } else if let Some(Modal::ThemeEditor(editor)) = state.modal.as_mut() {
+            editor.revert();
+            Some(editor.palette.clone())
+        } else {
+            None
+        };
+        if let Some(palette) = reverted {
+            state.theme = crate::theme::theme_from_palette(palette);
+        }
+    }
+    state.theme_picker = None;
+    if matches!(
+        state.modal,
+        Some(Modal::ThemePicker | Modal::ThemeEditor(_))
+    ) {
+        state.modal = None;
+    }
+}
+
+fn theme_save_fields() -> Vec<ldnddev_theme::ColorField> {
+    let mut fields = ldnddev_theme::COLOR_FIELDS.to_vec();
+    for extra in crate::theme::extra_theme_fields() {
+        if !fields.iter().any(|field| field.key == extra.key) {
+            fields.push(*extra);
+        }
+    }
+    fields
 }
 
 fn map_editor_key(key: KeyEvent) -> Option<ldnddev_theme::EditorKey> {
@@ -1756,33 +1926,35 @@ fn map_editor_key(key: KeyEvent) -> Option<ldnddev_theme::EditorKey> {
     })
 }
 
-fn save_theme_editor(state: &mut AppState) -> anyhow::Result<()> {
-    let Some(Modal::ThemeEditor(editor)) = &state.modal else {
-        return Ok(());
-    };
-    let target = editor.save_target;
+fn save_theme_palette(
+    state: &mut AppState,
+    palette: &ldnddev_theme::Palette,
+    target: ldnddev_theme::ThemeSaveTarget,
+    fields: &[ldnddev_theme::ColorField],
+) -> anyhow::Result<()> {
     let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let local = crate::theme::THEME_FILE_NAME;
     let path = ldnddev_theme::save_theme(
-        &editor.palette,
+        palette,
         &root,
-        local,
+        crate::theme::THEME_FILE_NAME,
         target,
         ldnddev_theme::default_config_home().as_deref(),
-        &editor.fields,
+        fields,
     )?;
-    let mut palette = editor.palette.clone();
+    let mut palette = palette.clone();
     palette.source = match target {
         ldnddev_theme::ThemeSaveTarget::Local => ldnddev_theme::ThemeSource::Local,
         ldnddev_theme::ThemeSaveTarget::Global => ldnddev_theme::ThemeSource::Global,
     };
     state.theme = crate::theme::theme_from_palette(palette);
+    state.follow_stamp = ldnddev_theme::follow_stamp(&state.omarchy_paths);
     state.theme_status =
         crate::theme::ThemeStatus::healthy(state.theme.source, state.theme.version);
     state.show_toast(
         ToastLevel::Success,
         format!("Saved {} theme to {}", target.label(), path.display()),
     );
+    state.theme_picker = None;
     state.modal = None;
     Ok(())
 }

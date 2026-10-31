@@ -16,7 +16,6 @@ use crate::state::AppState;
 use crate::toast::ToastLevel;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use unicode_width::UnicodeWidthStr;
 
@@ -87,6 +86,10 @@ fn draw_modal(f: &mut Frame, state: &mut AppState, area: Rect) {
         theme_modal::draw(f, state, modal_area);
         return;
     }
+    if matches!(state.modal, Some(Modal::ThemePicker)) {
+        theme_modal::draw_picker(f, state, modal_area);
+        return;
+    }
     if matches!(state.modal, Some(Modal::LogExpand)) {
         log::draw_expanded(f, state, modal_area);
         return;
@@ -100,7 +103,9 @@ fn draw_modal(f: &mut Frame, state: &mut AppState, area: Rect) {
     }
 
     match state.modal.clone() {
-        Some(Modal::Help { .. } | Modal::ThemeEditor(_) | Modal::LogExpand) => {}
+        Some(
+            Modal::Help { .. } | Modal::ThemePicker | Modal::ThemeEditor(_) | Modal::LogExpand,
+        ) => {}
         Some(Modal::Doctor { scroll }) => {
             let body = crate::doctor::render(
                 &state.tools,
@@ -307,44 +312,31 @@ fn draw_toast(f: &mut Frame, state: &mut AppState, area: Rect) {
         state.toast_area = None;
         return;
     };
-    if area.width < 8 || area.height < 5 {
-        state.toast_area = None;
-        return;
-    }
-    let max_width = area.width.saturating_sub(2).min(50);
-    let longest = toast
-        .message
-        .lines()
-        .map(|l| l.chars().count() as u16)
-        .max()
-        .unwrap_or(0);
-    let width = longest.saturating_add(4).clamp(24, max_width);
-    let height = (toast.message.lines().count().max(1) as u16)
-        .saturating_add(2)
-        .clamp(3, area.height.saturating_sub(1).min(7));
-    let x = area.x + area.width.saturating_sub(width).saturating_sub(1);
-    let y = area.y + area.height.saturating_sub(height).saturating_sub(1);
-    let toast_area = Rect::new(x, y, width, height);
-    state.toast_area = Some(toast_area);
-
-    let (title, border) = match toast.level {
-        ToastLevel::Info => ("Info", state.theme.info),
-        ToastLevel::Success => ("Success", state.theme.success),
-        ToastLevel::Warning => ("Warning", state.theme.warning_style),
-        ToastLevel::Error => ("Error", state.theme.error),
+    let colors = &state.theme.colors;
+    let kind = match toast.level {
+        ToastLevel::Info => crate::toast_chrome::ToastKind::Info,
+        ToastLevel::Success => crate::toast_chrome::ToastKind::Success,
+        ToastLevel::Warning => crate::toast_chrome::ToastKind::Warning,
+        ToastLevel::Error => crate::toast_chrome::ToastKind::Error,
     };
-    let text = Paragraph::new(Line::from(toast.message.as_str()))
-        .wrap(Wrap { trim: true })
-        .block(
-            Block::default()
-                .title(title)
-                .borders(Borders::ALL)
-                .border_style(border)
-                .style(state.theme.modal),
-        )
-        .style(state.theme.modal_text);
-    f.render_widget(Clear, toast_area);
-    f.render_widget(text, toast_area);
+    let areas = crate::toast_chrome::render_toast_stack(
+        f,
+        area,
+        &[crate::toast_chrome::ToastLine {
+            kind,
+            message: toast.message.as_str(),
+        }],
+        crate::toast_chrome::ToastPaint {
+            modal_background: colors.modal_background,
+            text: colors.text_primary,
+            success: colors.success,
+            info: colors.info,
+            warning: colors.warning,
+            error: colors.error,
+        },
+        0,
+    );
+    state.toast_area = areas.into_iter().next();
 }
 
 pub fn centered_box(width: u16, height: u16, area: Rect) -> Rect {

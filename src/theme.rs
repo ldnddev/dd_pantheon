@@ -1,7 +1,6 @@
 use anyhow::{Context, Result, anyhow};
 use ratatui::style::{Color, Modifier, Style};
-use serde::Deserialize;
-use std::fs;
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 pub const THEME_FILE_NAME: &str = "dd_pantheon_theme.yml";
@@ -60,49 +59,6 @@ impl ThemeStatus {
             message: message.into(),
         }
     }
-}
-
-#[derive(Debug, Deserialize)]
-struct ThemeFile {
-    version: Option<u64>,
-    #[serde(default)]
-    header_quotes: Option<Vec<String>>,
-    colors: Option<ThemeFileColors>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ThemeFileColors {
-    base_background: String,
-    body_background: String,
-    modal_background: String,
-    text_primary: String,
-    text_secondary: String,
-    text_labels: String,
-    text_active_focus: String,
-    modal_labels: String,
-    modal_text: String,
-    modal_header: String,
-    selected_background: String,
-    border_default: String,
-    border_active: String,
-    scrollbar: String,
-    scrollbar_hover: String,
-    input_border_default: String,
-    input_border_focus: String,
-    input_text_default: String,
-    input_text_focus: String,
-    cursor: String,
-    success: String,
-    warning: String,
-    error: String,
-    info: String,
-    folders: String,
-    files: String,
-    links: String,
-    #[serde(default)]
-    text_disabled: Option<String>,
-    #[serde(default)]
-    text_inverse: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -180,6 +136,8 @@ pub struct Theme {
     pub version: u64,
     pub colors: ThemeColors,
     pub header_quotes: Vec<String>,
+    pub omarchy: Option<ldnddev_theme::OmarchyChoice>,
+    pub overrides: BTreeSet<String>,
     pub warning: Option<String>,
     pub app_shell: Style,
     pub body: Style,
@@ -215,6 +173,8 @@ impl Theme {
             version,
             colors,
             header_quotes: vec![],
+            omarchy: None,
+            overrides: BTreeSet::new(),
             warning: None,
             app_shell: Style::default()
                 .fg(colors.text_primary)
@@ -300,14 +260,18 @@ impl Default for Theme {
 }
 
 pub fn load_theme(project_root: &Path) -> Theme {
+    load_theme_resolved(project_root, &ldnddev_theme::OmarchyPaths::system())
+}
+
+pub fn load_theme_resolved(project_root: &Path, omarchy: &ldnddev_theme::OmarchyPaths) -> Theme {
     let mut warnings: Vec<String> = Vec::new();
     let local = project_root.join(THEME_FILE_NAME);
-    if let Some(theme) = try_candidate(&local, ThemeSource::Local, &mut warnings) {
+    if let Some(theme) = try_candidate(&local, ThemeSource::Local, omarchy, &mut warnings) {
         return with_warnings(theme, warnings);
     }
     if let Some(home) = dirs::home_dir() {
         let global = home.join(".config/ldnddev").join(THEME_FILE_NAME);
-        if let Some(theme) = try_candidate(&global, ThemeSource::Global, &mut warnings) {
+        if let Some(theme) = try_candidate(&global, ThemeSource::Global, omarchy, &mut warnings) {
             return with_warnings(theme, warnings);
         }
     }
@@ -329,12 +293,18 @@ fn with_warnings(mut theme: Theme, warnings: Vec<String>) -> Theme {
     theme
 }
 
-fn try_candidate(path: &Path, source: ThemeSource, warnings: &mut Vec<String>) -> Option<Theme> {
+fn try_candidate(
+    path: &Path,
+    source: ThemeSource,
+    omarchy: &ldnddev_theme::OmarchyPaths,
+    warnings: &mut Vec<String>,
+) -> Option<Theme> {
     if !path.exists() {
         return None;
     }
-    match load_theme_file(path, source) {
-        Ok(theme) => Some(theme),
+    match ldnddev_theme::load_from_file(path, ldnddev_theme::ParseMode::Strict, ldnd_source(source))
+    {
+        Ok(palette) => Some(finish_palette(palette, omarchy)),
         Err(err) => {
             warnings.push(format!("{}: {err:#}; skipped", path.display()));
             None
@@ -342,80 +312,25 @@ fn try_candidate(path: &Path, source: ThemeSource, warnings: &mut Vec<String>) -
     }
 }
 
-fn load_theme_file(path: &Path, source: ThemeSource) -> Result<Theme> {
-    let content = fs::read_to_string(path)
-        .with_context(|| format!("Failed to read theme file: {}", path.display()))?;
-    let parsed: ThemeFile = serde_yaml::from_str(&content)
-        .with_context(|| format!("Failed to parse theme file: {}", path.display()))?;
-    match parsed.version {
-        Some(v) if v == SUPPORTED_THEME_VERSION => {}
-        Some(v) => {
-            return Err(anyhow!(
-                "Unsupported theme schema version `{v}` (expected `{SUPPORTED_THEME_VERSION}`)"
-            ));
-        }
-        None => {
-            return Err(anyhow!(
-                "Missing required theme key `version`; expected `{SUPPORTED_THEME_VERSION}`"
-            ));
-        }
+fn ldnd_source(source: ThemeSource) -> ldnddev_theme::ThemeSource {
+    match source {
+        ThemeSource::Local => ldnddev_theme::ThemeSource::Local,
+        ThemeSource::Global => ldnddev_theme::ThemeSource::Global,
+        ThemeSource::Default => ldnddev_theme::ThemeSource::Default,
     }
-    let colors_file = parsed
-        .colors
-        .ok_or_else(|| anyhow!("Missing required theme key `colors`"))?;
-    let colors = map_colors(colors_file)?;
-    let mut quotes = parsed.header_quotes.unwrap_or_default();
-    if quotes.is_empty() {
-        quotes = DEFAULT_HEADER_QUOTES
-            .iter()
-            .map(|s| (*s).to_string())
-            .collect();
-    }
-    let mut theme = Theme::from_colors(colors, source, SUPPORTED_THEME_VERSION);
-    theme.header_quotes = quotes;
-    Ok(theme)
 }
 
-fn map_colors(c: ThemeFileColors) -> Result<ThemeColors> {
-    Ok(ThemeColors {
-        base_background: parse_hex("base_background", &c.base_background)?,
-        body_background: parse_hex("body_background", &c.body_background)?,
-        modal_background: parse_hex("modal_background", &c.modal_background)?,
-        text_primary: parse_hex("text_primary", &c.text_primary)?,
-        text_secondary: parse_hex("text_secondary", &c.text_secondary)?,
-        text_labels: parse_hex("text_labels", &c.text_labels)?,
-        text_active_focus: parse_hex("text_active_focus", &c.text_active_focus)?,
-        modal_labels: parse_hex("modal_labels", &c.modal_labels)?,
-        modal_text: parse_hex("modal_text", &c.modal_text)?,
-        modal_header: parse_hex("modal_header", &c.modal_header)?,
-        selected_background: parse_hex("selected_background", &c.selected_background)?,
-        border_default: parse_hex("border_default", &c.border_default)?,
-        border_active: parse_hex("border_active", &c.border_active)?,
-        scrollbar: parse_hex("scrollbar", &c.scrollbar)?,
-        scrollbar_hover: parse_hex("scrollbar_hover", &c.scrollbar_hover)?,
-        input_border_default: parse_hex("input_border_default", &c.input_border_default)?,
-        input_border_focus: parse_hex("input_border_focus", &c.input_border_focus)?,
-        input_text_default: parse_hex("input_text_default", &c.input_text_default)?,
-        input_text_focus: parse_hex("input_text_focus", &c.input_text_focus)?,
-        cursor: parse_hex("cursor", &c.cursor)?,
-        success: parse_hex("success", &c.success)?,
-        warning: parse_hex("warning", &c.warning)?,
-        error: parse_hex("error", &c.error)?,
-        info: parse_hex("info", &c.info)?,
-        folders: parse_hex("folders", &c.folders)?,
-        files: parse_hex("files", &c.files)?,
-        links: parse_hex("links", &c.links)?,
-        text_disabled: c
-            .text_disabled
-            .as_deref()
-            .map(|v| parse_hex("text_disabled", v))
-            .transpose()?,
-        text_inverse: c
-            .text_inverse
-            .as_deref()
-            .map(|v| parse_hex("text_inverse", v))
-            .transpose()?,
-    })
+fn finish_palette(palette: ldnddev_theme::Palette, omarchy: &ldnddev_theme::OmarchyPaths) -> Theme {
+    match ldnddev_theme::apply_omarchy(&palette, omarchy) {
+        Ok(resolved) => theme_from_palette(resolved),
+        Err(err) => {
+            let mut theme = Theme::default();
+            theme.warning = Some(format!(
+                "omarchy theme failed ({err}); using built-in defaults"
+            ));
+            theme
+        }
+    }
 }
 
 pub fn parse_hex(key: &str, value: &str) -> Result<Color> {
@@ -476,6 +391,8 @@ pub fn palette_from_theme(theme: &Theme) -> ldnddev_theme::Palette {
         ThemeSource::Default => ldnddev_theme::ThemeSource::Default,
     };
     palette.version = theme.version;
+    palette.omarchy = theme.omarchy.clone();
+    palette.overrides = theme.overrides.clone();
     let c = theme.colors;
     let pairs = [
         ("base_background", c.base_background),
@@ -566,5 +483,7 @@ pub fn theme_from_palette(palette: ldnddev_theme::Palette) -> Theme {
     } else {
         quotes
     };
+    theme.omarchy = palette.omarchy;
+    theme.overrides = palette.overrides;
     theme
 }

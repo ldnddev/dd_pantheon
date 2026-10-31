@@ -59,6 +59,8 @@ pub enum Modal {
     Help {
         scroll: u16,
     },
+    /// Omarchy theme list. The picker itself lives on [`AppState::theme_picker`].
+    ThemePicker,
     ThemeEditor(ldnddev_theme::ThemeEditor),
     Doctor {
         scroll: u16,
@@ -186,6 +188,7 @@ impl Modal {
                 | Self::LogExpand
                 | Self::TagPicker { .. }
                 | Self::OrgPicker { .. }
+                | Self::ThemePicker
                 | Self::ThemeEditor(_)
                 | Self::BackupPick { .. }
                 | Self::DomainRemove { .. }
@@ -452,6 +455,11 @@ impl TreeRow {
 pub struct AppState {
     pub theme: Theme,
     pub theme_status: ThemeStatus,
+    /// Stays set while the hex editor is open so Esc returns to the list.
+    pub theme_picker: Option<ldnddev_theme::ThemePicker>,
+    pub omarchy_paths: ldnddev_theme::OmarchyPaths,
+    /// Stamp of the followed desktop theme. Compared on focus gain only.
+    pub follow_stamp: Option<String>,
     pub header_copy: String,
     pub session_started: String,
     pub demo: bool,
@@ -543,6 +551,13 @@ impl AppState {
         } else {
             ThemeStatus::healthy(theme.source, theme.version)
         };
+        let omarchy_paths = ldnddev_theme::OmarchyPaths::system();
+        let follow_stamp = match &theme.omarchy {
+            Some(ldnddev_theme::OmarchyChoice::Follow) => {
+                ldnddev_theme::follow_stamp(&omarchy_paths)
+            }
+            _ => None,
+        };
 
         let mut state = Self {
             header_copy: String::new(),
@@ -622,6 +637,9 @@ impl AppState {
             footer_area: Rect::default(),
             theme,
             theme_status,
+            theme_picker: None,
+            omarchy_paths,
+            follow_stamp,
         };
         state.header_copy = random_header_copy(&state.theme.header_quotes);
         state.rebuild_tree();
@@ -642,6 +660,40 @@ impl AppState {
         } else {
             false
         }
+    }
+
+    /// Re-read `omarchy: follow` when the desktop theme file changes.
+    /// Does not reshuffle `header_copy`.
+    pub fn refresh_followed_theme(&mut self) -> bool {
+        if self.theme_picker.is_some()
+            || matches!(self.modal, Some(Modal::ThemePicker | Modal::ThemeEditor(_)))
+        {
+            return false;
+        }
+        if !matches!(
+            self.theme.omarchy,
+            Some(ldnddev_theme::OmarchyChoice::Follow)
+        ) {
+            return false;
+        }
+        let stamp = ldnddev_theme::follow_stamp(&self.omarchy_paths);
+        if stamp == self.follow_stamp {
+            return false;
+        }
+        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let theme = crate::theme::load_theme_resolved(&cwd, &self.omarchy_paths);
+        self.follow_stamp = stamp;
+        let warning = theme.warning.clone();
+        let source = theme.source;
+        let version = theme.version;
+        self.theme = theme;
+        if let Some(msg) = warning {
+            self.theme_status = ThemeStatus::warning(msg.clone());
+            self.show_toast(crate::toast::ToastLevel::Warning, msg);
+        } else {
+            self.theme_status = ThemeStatus::healthy(source, version);
+        }
+        true
     }
 
     pub fn log_visible_rows(&self) -> u16 {

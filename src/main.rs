@@ -74,6 +74,11 @@ fn run_app(cli: RunOpts) -> Result<()> {
             }
             loop {
                 match event::read()? {
+                    Event::FocusGained => {
+                        if app.state.refresh_followed_theme() {
+                            needs_draw = true;
+                        }
+                    }
                     ev if !event_is_actionable(&ev) => {}
                     Event::Key(key) => {
                         if app.handle_key(key)? {
