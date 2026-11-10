@@ -12,18 +12,26 @@
 #   ./install.sh install        # same
 #   ./install.sh --from-release # always download the GitHub package
 #   ./install.sh --from-source  # always cargo build
-#   ./install.sh uninstall      # remove the binary + default theme (not app config)
+#   ./install.sh uninstall      # remove the binary, desktop launcher, and default theme (not app config)
 #   ./install.sh --help
 #
 # Override defaults via env:
 #   PREFIX=$HOME/.local            # binary at $PREFIX/bin/dd_pantheon
 #   BINDIR=/path/to/bin            # wins over PREFIX
 #   XDG_CONFIG_HOME=$HOME/.config  # theme at …/ldnddev/dd_pantheon_theme.yml
-#   VERSION=latest                 # or v0.3.6 / 0.3.6
+#   XDG_DATA_HOME=$HOME/.local/share  # Linux launcher at …/applications/dd_pantheon.desktop
+#   VERSION=latest                 # or v0.3.7 / 0.3.7
 #   DD_PANTHEON_REPO=ldnddev/dd_pantheon
 #   GITHUB_TOKEN=…                 # optional; raises GitHub API rate limits
 #
-# Re-run safe: the binary is overwritten; an existing theme file is left alone.
+# On Linux, install writes a Terminal=true launcher so the TUI shows up in
+# the application menu. $XDG_DATA_HOME/applications wins when that variable
+# is set. Otherwise a binary under $HOME uses ~/.local/share/applications,
+# and a prefix outside $HOME uses $PREFIX/share/applications (or the parent
+# of BINDIR). macOS has no desktop file. Uninstall removes that launcher
+# when you pass the same PREFIX, BINDIR, and XDG_DATA_HOME as the install.
+#
+# Re-run safe: the binary and launcher are overwritten; an existing theme file is left alone.
 # App state (~/.config/ldnddev/dd_pantheon/) is never written or deleted here.
 # Safe to pipe from curl: the script never reads stdin.
 
@@ -49,11 +57,11 @@ From a clone:
   ./install.sh                  cargo build if available, else GitHub Release
   ./install.sh --from-release   GitHub Release tarball for this OS/arch
   ./install.sh --from-source    cargo build --release
-  ./install.sh uninstall        remove binary + default theme (not app config)
+  ./install.sh uninstall        remove binary, desktop launcher, and default theme (not app config)
 
 Flags:
   install          default
-  uninstall        remove the install
+  uninstall        remove the binary, desktop launcher, and default theme
   --from-release   download the matching GitHub package
   --from-source    build with cargo (needs a clone or git)
   --debug          cargo build without --release
@@ -62,7 +70,8 @@ Flags:
   -h, --help       this help
 
 Env:
-  PREFIX, BINDIR, XDG_CONFIG_HOME, VERSION, DD_PANTHEON_REPO, GITHUB_TOKEN
+  PREFIX, BINDIR, XDG_CONFIG_HOME, XDG_DATA_HOME, VERSION, DD_PANTHEON_REPO, GITHUB_TOKEN
+  Uninstall needs the same PREFIX, BINDIR, and XDG_DATA_HOME as the install.
 USAGE
 }
 
@@ -253,16 +262,108 @@ THEME_DIR="${CONFIG_HOME%/}/${THEME_DIR_NAME}"
 THEME_TARGET="$THEME_DIR/$THEME_FILE_NAME"
 APP_CONFIG_DIR="${CONFIG_HOME%/}/${THEME_DIR_NAME}/${APP_NAME}"
 
+# Menu launchers. $XDG_DATA_HOME/applications wins when set. A binary under
+# $HOME otherwise goes to ~/.local/share/applications. A prefix outside $HOME
+# uses $PREFIX/share/applications, or the parent of BINDIR when PREFIX is unset.
+apps_dir() {
+  if [ -n "${XDG_DATA_HOME:-}" ]; then
+    printf '%s/applications\n' "${XDG_DATA_HOME%/}"
+    return 0
+  fi
+  case "$INSTALL_DIR" in
+    "$HOME" | "$HOME"/*)
+      printf '%s/.local/share/applications\n' "$HOME"
+      ;;
+    *)
+      if [ -n "${PREFIX:-}" ]; then
+        printf '%s/share/applications\n' "${PREFIX%/}"
+      else
+        printf '%s/share/applications\n' "$(dirname -- "$INSTALL_DIR")"
+      fi
+      ;;
+  esac
+}
+
+# Quote one Exec argument. A literal % is %%.
+desktop_quote() {
+  local s="$1"
+  case "$s" in
+    *$'\n'*) fail "desktop path contains a newline" ;;
+  esac
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  s="${s//\`/\\\`}"
+  s="${s//\$/\\\$}"
+  s="${s//%/%%}"
+  printf '"%s"' "$s"
+}
+
+refresh_desktop_database() {
+  local dir="$1"
+  if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database "$dir" >/dev/null 2>&1 || true
+  fi
+}
+
+install_launcher() {
+  if [ "$(uname -s)" != Linux ]; then
+    info "desktop launcher skipped on $(uname -s)"
+    return 0
+  fi
+  local dir dest exec_q bin
+  dir="$(apps_dir)"
+  bin="${INSTALL_DIR}/${APP_NAME}"
+  [ -x "$bin" ] || fail "cannot write a launcher; ${bin} is not executable"
+  mkdir -p "$dir"
+  dest="${dir}/${APP_NAME}.desktop"
+  exec_q="$(desktop_quote "$bin")"
+  {
+    printf '%s\n' "[Desktop Entry]"
+    printf '%s\n' "Type=Application"
+    printf '%s\n' "Version=1.0"
+    printf '%s\n' "Name=${APP_NAME}"
+    printf '%s\n' "GenericName=Pantheon operations"
+    printf '%s\n' "Comment=Operate Pantheon WordPress and Drupal sites in the terminal"
+    printf '%s\n' "Exec=${exec_q}"
+    printf '%s\n' "TryExec=${bin}"
+    printf '%s\n' "Icon=utilities-terminal"
+    printf '%s\n' "Terminal=true"
+    printf '%s\n' "Categories=Development;ConsoleOnly;"
+    printf '%s\n' "Keywords=pantheon;wordpress;drupal;terminus;"
+    printf '%s\n' "StartupNotify=false"
+  } >"$dest"
+  chmod 644 "$dest"
+  info "installed launcher ${dest}"
+  refresh_desktop_database "$dir"
+}
+
+remove_launcher() {
+  if [ "$(uname -s)" != Linux ]; then
+    return 0
+  fi
+  local dir dest
+  dir="$(apps_dir)"
+  dest="${dir}/${APP_NAME}.desktop"
+  if [ -e "$dest" ] || [ -L "$dest" ]; then
+    rm -f -- "$dest"
+    info "removed ${dest}"
+    refresh_desktop_database "$dir"
+  else
+    info "launcher not found at ${dest}"
+  fi
+}
+
 if [ "$UNINSTALL" -eq 1 ]; then
   info "uninstalling ${APP_NAME}"
   if [ -e "$INSTALL_DIR/$APP_NAME" ] || [ -L "$INSTALL_DIR/$APP_NAME" ]; then
-    rm -f "$INSTALL_DIR/$APP_NAME"
+    rm -f -- "$INSTALL_DIR/$APP_NAME"
     info "removed ${INSTALL_DIR}/${APP_NAME}"
   else
     info "binary not found at ${INSTALL_DIR}/${APP_NAME}"
   fi
+  remove_launcher
   if [ -e "$THEME_TARGET" ] || [ -L "$THEME_TARGET" ]; then
-    rm -f "$THEME_TARGET"
+    rm -f -- "$THEME_TARGET"
     info "removed ${THEME_TARGET}"
   else
     info "theme not found at ${THEME_TARGET}"
@@ -285,6 +386,7 @@ install_theme() {
 }
 
 finish() {
+  install_launcher
   case ":$PATH:" in
     *":$INSTALL_DIR:"*) ;;
     *)

@@ -13,7 +13,15 @@ dd_pantheon
 dd_pantheon --root ~/sites/acme-wp
 ```
 
-Pin a version with `VERSION=v0.3.6`. Uninstall:
+Pin a version with `VERSION=v0.3.7`. On Linux the install also writes
+`dd_pantheon.desktop` (`Terminal=true`) so the TUI shows up in the application
+menu. `$XDG_DATA_HOME/applications` wins when that variable is set. Otherwise a
+user install uses `~/.local/share/applications`, and a prefix outside your home
+directory uses `$PREFIX/share/applications`. macOS skips the launcher.
+
+Uninstall removes the binary, that launcher, and the default theme. It leaves
+`~/.config/ldnddev/dd_pantheon/` alone. Pass the same `PREFIX`, `BINDIR`, and
+`XDG_DATA_HOME` you used to install.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ldnddev/dd_pantheon/main/install.sh | bash -s -- uninstall
@@ -26,7 +34,7 @@ it uses the same GitHub package as curl:
 ./install.sh                 # cargo release build, or GitHub package
 ./install.sh --from-release  # always the GitHub package for this machine
 ./install.sh --from-source   # always cargo
-./install.sh uninstall       # removes the binary + default theme, not app config
+./install.sh uninstall       # binary, desktop launcher, and default theme
 ```
 
 From a clone without installing:
