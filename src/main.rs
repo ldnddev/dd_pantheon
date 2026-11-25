@@ -1,7 +1,10 @@
 use anyhow::Result;
 use crossterm::{
     ExecutableCommand,
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event},
+    event::{
+        self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+        Event,
+    },
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use dd_pantheon::app::{App, LaunchOpts};
@@ -43,6 +46,7 @@ fn run_app(cli: RunOpts) -> Result<()> {
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;
     let _ = stdout().execute(EnableMouseCapture);
+    let _ = stdout().execute(EnableBracketedPaste);
 
     let backend = CrosstermBackend::new(stdout());
     let mut terminal = Terminal::new(backend)?;
@@ -79,6 +83,10 @@ fn run_app(cli: RunOpts) -> Result<()> {
                             needs_draw = true;
                         }
                     }
+                    Event::Paste(text) => {
+                        app.paste_text(&text)?;
+                        needs_draw = true;
+                    }
                     ev if !event_is_actionable(&ev) => {}
                     Event::Key(key) => {
                         if app.handle_key(key)? {
@@ -104,6 +112,7 @@ fn run_app(cli: RunOpts) -> Result<()> {
     })();
 
     let _ = app.save();
+    let _ = stdout().execute(DisableBracketedPaste);
     let _ = stdout().execute(DisableMouseCapture);
     let _ = stdout().execute(LeaveAlternateScreen);
     let _ = disable_raw_mode();

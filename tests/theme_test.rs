@@ -1,7 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use dd_pantheon::app::App;
 use dd_pantheon::models::{CACHE_OK, CACHE_WARN, CacheLevel, cache_ratio_level};
-use dd_pantheon::state::Modal;
 use dd_pantheon::theme::{
     SUPPORTED_THEME_VERSION, ThemeSource, color_hex, load_theme, load_theme_resolved,
 };
@@ -10,7 +9,30 @@ use ratatui::backend::TestBackend;
 use ratatui::style::Color;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Theme lookup reads `~/.config/ldnddev`. These tests need a home with no theme file.
+fn with_empty_home<T>(body: impl FnOnce() -> T) -> T {
+    static LOCK: Mutex<()> = Mutex::new(());
+    let _guard = LOCK.lock().expect("theme home lock");
+    let prev = std::env::var_os("HOME");
+    let home = temp_path("dd_pantheon_empty_home");
+    fs::create_dir_all(&home).expect("empty home");
+    unsafe {
+        std::env::set_var("HOME", &home);
+    }
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(body));
+    match &prev {
+        Some(value) => unsafe { std::env::set_var("HOME", value) },
+        None => unsafe { std::env::remove_var("HOME") },
+    }
+    let _ = fs::remove_dir_all(&home);
+    match result {
+        Ok(value) => value,
+        Err(payload) => std::panic::resume_unwind(payload),
+    }
+}
 
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
@@ -98,40 +120,44 @@ fn local_standard_theme_file_is_loaded() {
 
 #[test]
 fn missing_version_falls_back_to_default_with_warning() {
-    let root = temp_path("dd_pantheon_theme_missing_version");
-    fs::create_dir_all(&root).expect("create root");
-    fs::write(
-        root.join("dd_pantheon_theme.yml"),
-        "colors:\n  base_background: \"#010203\"\n",
-    )
-    .expect("write theme");
+    with_empty_home(|| {
+        let root = temp_path("dd_pantheon_theme_missing_version");
+        fs::create_dir_all(&root).expect("create root");
+        fs::write(
+            root.join("dd_pantheon_theme.yml"),
+            "colors:\n  base_background: \"#010203\"\n",
+        )
+        .expect("write theme");
 
-    let theme = load_theme(&root);
-    assert_eq!(theme.source, ThemeSource::Default);
-    assert!(theme.warning.as_ref().unwrap().contains("version"));
-    let _ = fs::remove_dir_all(root);
+        let theme = load_theme(&root);
+        assert_eq!(theme.source, ThemeSource::Default);
+        assert!(theme.warning.as_ref().unwrap().contains("version"));
+        let _ = fs::remove_dir_all(root);
+    });
 }
 
 #[test]
 fn unsupported_version_falls_back_to_default_with_warning() {
-    let root = temp_path("dd_pantheon_theme_bad_version");
-    fs::create_dir_all(&root).expect("create root");
-    fs::write(
-        root.join("dd_pantheon_theme.yml"),
-        "version: 999\ncolors:\n  base_background: \"#010203\"\n",
-    )
-    .expect("write theme");
+    with_empty_home(|| {
+        let root = temp_path("dd_pantheon_theme_bad_version");
+        fs::create_dir_all(&root).expect("create root");
+        fs::write(
+            root.join("dd_pantheon_theme.yml"),
+            "version: 999\ncolors:\n  base_background: \"#010203\"\n",
+        )
+        .expect("write theme");
 
-    let app = App::new_demo_in(&root, &root).expect("app init");
-    assert_eq!(app.state.theme.source, ThemeSource::Default);
-    assert!(
-        app.state
-            .theme_status
-            .message
-            .to_ascii_lowercase()
-            .contains("version")
-    );
-    let _ = fs::remove_dir_all(root);
+        let app = App::new_demo_in(&root, &root).expect("app init");
+        assert_eq!(app.state.theme.source, ThemeSource::Default);
+        assert!(
+            app.state
+                .theme_status
+                .message
+                .to_ascii_lowercase()
+                .contains("version")
+        );
+        let _ = fs::remove_dir_all(root);
+    });
 }
 
 #[test]
@@ -198,34 +224,56 @@ fn f2_lists_omarchy_themes_and_esc_reverts() {
     app.state.omarchy_paths = ldnddev_theme::OmarchyPaths::from_root(&omarchy);
     let before = color_hex(app.state.theme.colors.body_background);
     app.handle_key(key(KeyCode::F(2))).expect("f2");
-    assert!(
-        matches!(app.state.modal, Some(Modal::ThemePicker)),
-        "F2 should open the picker"
-    );
+    assert!(app.state.show_settings, "F2 should open Settings");
+    assert!(app.state.modal.is_none());
     assert!(app.state.theme_picker.is_some());
-    assert!(!matches!(app.state.modal, Some(Modal::ThemeEditor(_))));
+    assert!(app.state.theme_editor.is_none());
+    assert_eq!(app.state.settings_nav, 0);
     let listed = buffer_text(&mut app, 120, 40);
-    assert!(listed.contains("F2 Themes"), "{listed}");
+    assert!(listed.contains("Settings"), "{listed}");
+    assert!(listed.contains("Themes"), "{listed}");
+    assert!(listed.contains("acme-wp"), "body stays visible\n{listed}");
+    assert!(!listed.contains("F2 Themes"), "{listed}");
     assert!(listed.contains("Enter apply"), "{listed}");
-    assert!(listed.contains("e edit"), "{listed}");
-    assert!(listed.contains("s save"), "{listed}");
+    assert!(listed.contains("e colors"), "{listed}");
+    assert!(listed.contains("y save"), "{listed}");
+    assert!(listed.contains("t target"), "{listed}");
+
+    app.handle_key(key(KeyCode::Char('t'))).expect("t");
+    assert_eq!(
+        app.state.theme_picker.as_ref().unwrap().save_target,
+        ldnddev_theme::ThemeSaveTarget::Local
+    );
 
     app.handle_key(key(KeyCode::Char('g'))).expect("g");
+    assert_eq!(
+        color_hex(app.state.theme.colors.body_background),
+        "#1A1B26",
+        "j/k/g preview the highlighted row"
+    );
     app.handle_key(key(KeyCode::Enter)).expect("enter");
     assert_eq!(color_hex(app.state.theme.colors.body_background), "#1A1B26");
 
     app.handle_key(key(KeyCode::Char('e'))).expect("e");
-    assert!(matches!(app.state.modal, Some(Modal::ThemeEditor(_))));
+    assert!(app.state.theme_editor.is_some());
     assert!(app.state.theme_picker.is_some());
+    assert!(app.state.show_settings);
     let editing = buffer_text(&mut app, 120, 40);
     assert!(editing.contains("Esc back"), "{editing}");
 
     app.handle_key(key(KeyCode::Esc)).expect("esc editor");
-    assert!(matches!(app.state.modal, Some(Modal::ThemePicker)));
-    assert!(!matches!(app.state.modal, Some(Modal::ThemeEditor(_))));
+    assert!(app.state.theme_editor.is_none());
     assert!(app.state.theme_picker.is_some());
+    assert!(app.state.show_settings);
 
-    app.handle_key(key(KeyCode::Esc)).expect("esc list");
+    app.handle_key(key(KeyCode::Tab)).expect("tab help");
+    assert_eq!(app.state.settings_nav, 1);
+    let help = buffer_text(&mut app, 120, 40);
+    assert!(help.contains("F1 / F2"), "{help}");
+    assert!(help.contains("Ctrl+Q"), "{help}");
+
+    app.handle_key(key(KeyCode::Esc)).expect("esc help");
+    assert!(!app.state.show_settings);
     assert!(app.state.modal.is_none());
     assert!(app.state.theme_picker.is_none());
     assert_eq!(color_hex(app.state.theme.colors.body_background), before);
@@ -241,15 +289,33 @@ fn f2_without_omarchy_opens_hex_editor() {
         "/nonexistent/dd_pantheon_omarchy",
     ));
     let before = color_hex(app.state.theme.colors.body_background);
+    let base_before = color_hex(app.state.theme.colors.base_background);
     app.handle_key(key(KeyCode::F(2))).expect("f2");
-    assert!(matches!(app.state.modal, Some(Modal::ThemeEditor(_))));
+    assert!(app.state.show_settings);
+    assert!(app.state.theme_editor.is_some());
     assert!(app.state.theme_picker.is_none());
+    assert!(app.state.modal.is_none());
     let editing = buffer_text(&mut app, 120, 40);
     assert!(editing.contains("Esc revert"), "{editing}");
     assert!(!editing.contains("Esc back"), "{editing}");
+    app.handle_key(key(KeyCode::Char('l'))).expect("nudge");
+    assert_ne!(color_hex(app.state.theme.colors.base_background), base_before);
     app.handle_key(key(KeyCode::F(2))).expect("f2 again");
-    assert!(app.state.modal.is_none());
+    assert!(!app.state.show_settings);
+    assert!(app.state.theme_editor.is_none());
     assert_eq!(color_hex(app.state.theme.colors.body_background), before);
+    assert_eq!(color_hex(app.state.theme.colors.base_background), base_before);
+
+    app.handle_key(key(KeyCode::F(1))).expect("f1");
+    assert!(app.state.show_settings);
+    app.handle_key(key(KeyCode::Char('l'))).expect("nudge");
+    let ctrl_q = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL);
+    app.handle_key(key(KeyCode::Char('q'))).expect("bare q");
+    assert!(!app.state.should_quit);
+    assert!(app.state.show_settings);
+    let quit = app.handle_key(ctrl_q).expect("ctrl q");
+    assert!(quit);
+    assert!(app.state.should_quit);
     let _ = fs::remove_dir_all(root);
 }
 

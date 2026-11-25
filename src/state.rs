@@ -56,12 +56,6 @@ pub enum TreeSel {
 
 #[derive(Clone, Debug)]
 pub enum Modal {
-    Help {
-        scroll: u16,
-    },
-    /// Omarchy theme list. The picker itself lives on [`AppState::theme_picker`].
-    ThemePicker,
-    ThemeEditor(ldnddev_theme::ThemeEditor),
     Doctor {
         scroll: u16,
     },
@@ -180,16 +174,13 @@ impl Modal {
     pub fn dismiss_on_click_outside(&self) -> bool {
         matches!(
             self,
-            Self::Help { .. }
-                | Self::Doctor { .. }
+            Self::Doctor { .. }
                 | Self::Filter { .. }
                 | Self::Palette { form: None, .. }
                 | Self::Error { .. }
                 | Self::LogExpand
                 | Self::TagPicker { .. }
                 | Self::OrgPicker { .. }
-                | Self::ThemePicker
-                | Self::ThemeEditor(_)
                 | Self::BackupPick { .. }
                 | Self::DomainRemove { .. }
         )
@@ -452,11 +443,23 @@ impl TreeRow {
     }
 }
 
+/// Settings sheet pages. Themes is first. Help is last. F3 stays Doctor.
+pub const SETTINGS_PAGES: [&str; 2] = ["Themes", "Help"];
+pub const SETTINGS_HELP: u8 = 1;
+
 pub struct AppState {
     pub theme: Theme,
     pub theme_status: ThemeStatus,
-    /// Stays set while the hex editor is open so Esc returns to the list.
+    /// Right-half Settings sheet. F1 and F2 toggle it.
+    pub show_settings: bool,
+    pub settings_nav: u8,
+    pub settings_follow: bool,
+    pub help_scroll: u16,
+    pub help_scroll_max: u16,
+    pub settings_nav_area: Rect,
+    /// Omarchy list. Stays set while the color editor is open so Esc returns to it.
     pub theme_picker: Option<ldnddev_theme::ThemePicker>,
+    pub theme_editor: Option<ldnddev_theme::ThemeEditor>,
     pub omarchy_paths: ldnddev_theme::OmarchyPaths,
     /// Stamp of the followed desktop theme. Compared on focus gain only.
     pub follow_stamp: Option<String>,
@@ -637,7 +640,14 @@ impl AppState {
             footer_area: Rect::default(),
             theme,
             theme_status,
+            show_settings: false,
+            settings_nav: 0,
+            settings_follow: false,
+            help_scroll: 0,
+            help_scroll_max: 0,
+            settings_nav_area: Rect::default(),
             theme_picker: None,
+            theme_editor: None,
             omarchy_paths,
             follow_stamp,
         };
@@ -665,9 +675,7 @@ impl AppState {
     /// Re-read `omarchy: follow` when the desktop theme file changes.
     /// Does not reshuffle `header_copy`.
     pub fn refresh_followed_theme(&mut self) -> bool {
-        if self.theme_picker.is_some()
-            || matches!(self.modal, Some(Modal::ThemePicker | Modal::ThemeEditor(_)))
-        {
+        if self.show_settings || self.theme_picker.is_some() || self.theme_editor.is_some() {
             return false;
         }
         if !matches!(

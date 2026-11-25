@@ -1,13 +1,16 @@
 [package]
 name = "dd_pantheon"
-version = "0.3.7"
+version = "0.3.8"
 edition = "2024"
 license = "MIT"
 description = "Guided operations cockpit for Pantheon sites (Terminus + Lando)"
 
 [workspace]
 resolver = "3"
-members = ["crates/ldnddev_theme"]
+members = ["crates/ldnddev_theme", "crates/dd_pantheon_gui"]
+# The TUI binary is the root package. The GUI crate is a member so CI sees it,
+# and it stays off this list so `cargo build` and a terminal install skip GPUI.
+default-members = [".", "crates/ldnddev_theme"]
 
 [profile.release]
 opt-level = "z"

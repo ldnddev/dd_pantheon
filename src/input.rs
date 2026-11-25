@@ -20,6 +20,50 @@ pub fn event_is_actionable(event: &Event) -> bool {
     }
 }
 
+/// Bracketed paste into the text field that would take typed characters.
+/// One call. Controls other than space are dropped. Hotkey forms ignore it.
+pub fn paste_text(state: &mut AppState, raw: &str) -> Result<()> {
+    if !accepts_paste(state) {
+        return Ok(());
+    }
+    for ch in raw.chars() {
+        if ch.is_ascii_graphic() || ch == ' ' {
+            handle_key(
+                state,
+                KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE),
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn accepts_paste(state: &AppState) -> bool {
+    match &state.modal {
+        Some(
+            Modal::Filter { .. }
+            | Modal::TagAdd { .. }
+            | Modal::LiveGate { .. }
+            | Modal::MultidevCreate { .. }
+            | Modal::DomainAdd { .. }
+            | Modal::HttpsSet { .. }
+            | Modal::LockEnable { .. },
+        ) => true,
+        Some(Modal::Login { use_env_token, .. }) => !use_env_token,
+        Some(Modal::DeployNote { focus, .. }) => *focus == 0,
+        Some(Modal::Cms { form }) => matches!(form.focus, CmsFocus::Command),
+        Some(Modal::SiteCreate { form }) => matches!(
+            form.focus,
+            CreateField::Name | CreateField::Label | CreateField::Path
+        ),
+        Some(Modal::Palette { form: None, .. }) => true,
+        Some(Modal::Palette {
+            form: Some(form), ..
+        }) => form.focused_toggle().is_none(),
+        Some(_) => false,
+        None => state.show_settings && editing_theme_hex(state),
+    }
+}
+
 pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
     if key.kind != crossterm::event::KeyEventKind::Press
         && key.kind != crossterm::event::KeyEventKind::Repeat
@@ -34,6 +78,16 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
         }
         state.should_quit = true;
         return Ok(true);
+    }
+
+    // The live gate is collecting a typed word. Settings must not take F1/F2.
+    if matches!(state.modal, Some(Modal::LiveGate { .. })) {
+        let modal = state.modal.clone().expect("live gate");
+        return handle_modal(state, key, modal);
+    }
+
+    if state.show_settings && state.modal.is_none() {
+        return handle_settings(state, key);
     }
 
     let text_field = matches!(
@@ -55,19 +109,14 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<bool> {
         )
     );
 
-    if theme_ui_open(state) && key.code == KeyCode::F(2) {
-        close_theme(state, true);
-        return Ok(false);
-    }
-
-    if !text_field && !theme_ui_open(state) {
+    if !text_field && state.modal.is_none() {
         match key.code {
-            KeyCode::F(1) | KeyCode::Char('?') => {
-                state.modal = Some(Modal::Help { scroll: 0 });
+            KeyCode::F(1) | KeyCode::F(2) => {
+                open_settings(state, 0);
                 return Ok(false);
             }
-            KeyCode::F(2) => {
-                open_theme_ui(state);
+            KeyCode::Char('?') => {
+                open_settings(state, crate::state::SETTINGS_HELP);
                 return Ok(false);
             }
             KeyCode::F(3) => {
@@ -271,37 +320,6 @@ fn handle_modal(state: &mut AppState, key: KeyEvent, modal: Modal) -> Result<boo
                 state.modal = Some(Modal::TagPicker { tags, selected });
             }
         },
-        Modal::Help { scroll } => match key.code {
-            KeyCode::Esc | KeyCode::Char('q') | KeyCode::F(1) => state.modal = None,
-            KeyCode::Char('j') | KeyCode::Down => {
-                state.modal = Some(Modal::Help {
-                    scroll: scroll.saturating_add(1),
-                });
-            }
-            KeyCode::Char('k') | KeyCode::Up => {
-                state.modal = Some(Modal::Help {
-                    scroll: scroll.saturating_sub(1),
-                });
-            }
-            KeyCode::PageDown => {
-                state.modal = Some(Modal::Help {
-                    scroll: scroll.saturating_add(10),
-                });
-            }
-            KeyCode::PageUp => {
-                state.modal = Some(Modal::Help {
-                    scroll: scroll.saturating_sub(10),
-                });
-            }
-            KeyCode::Home | KeyCode::Char('g') => {
-                state.modal = Some(Modal::Help { scroll: 0 });
-            }
-            _ => {}
-        },
-        Modal::ThemePicker => handle_theme_picker(state, key),
-        Modal::ThemeEditor(_) => {
-            handle_theme_editor(state, key);
-        }
         Modal::Doctor { scroll } => match key.code {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::F(3) => state.modal = None,
             KeyCode::Char('j') | KeyCode::Down => {
@@ -1562,24 +1580,19 @@ pub fn handle_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<bool> {
             let down = matches!(mouse.kind, MouseEventKind::ScrollDown);
             if matches!(state.modal, Some(Modal::LogExpand)) {
                 scroll_log(state, if down { 1 } else { -1 });
-            } else if matches!(
-                state.modal,
-                Some(Modal::ThemeEditor(_) | Modal::ThemePicker)
-            ) {
-                scroll_theme(state, if down { 1 } else { -1 });
-            } else {
-                match &mut state.modal {
-                    Some(Modal::Help { scroll }) | Some(Modal::Doctor { scroll }) => {
-                        if down {
-                            *scroll = scroll.saturating_add(1);
-                        } else {
-                            *scroll = scroll.saturating_sub(1);
-                        }
-                    }
-                    _ => {}
+            } else if let Some(Modal::Doctor { scroll }) = &mut state.modal {
+                if down {
+                    *scroll = scroll.saturating_add(1);
+                } else {
+                    *scroll = scroll.saturating_sub(1);
                 }
             }
         }
+        return Ok(false);
+    }
+
+    if state.show_settings {
+        settings_mouse(state, mouse);
         return Ok(false);
     }
 
@@ -1700,21 +1713,184 @@ fn row_at(area: Rect, y: u16, len: usize) -> Option<usize> {
 }
 
 fn dismiss_modal(state: &mut AppState) {
-    if theme_ui_open(state) {
-        close_theme(state, true);
-        return;
-    }
     state.modal = None;
 }
 
-fn theme_ui_open(state: &AppState) -> bool {
-    matches!(
-        state.modal,
-        Some(Modal::ThemePicker | Modal::ThemeEditor(_))
-    )
+fn handle_settings(state: &mut AppState, key: KeyEvent) -> Result<bool> {
+    if matches!(key.code, KeyCode::F(1) | KeyCode::F(2)) {
+        close_settings(state, true);
+        return Ok(false);
+    }
+    if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        crate::workflows::cancel_jobs(state);
+        return Ok(false);
+    }
+    if key.code == KeyCode::Char('?') {
+        state.settings_nav = crate::state::SETTINGS_HELP;
+        state.help_scroll = 0;
+        state.settings_follow = false;
+        return Ok(false);
+    }
+    if key.code == KeyCode::PageDown {
+        scroll_settings(state, 10);
+        return Ok(false);
+    }
+    if key.code == KeyCode::PageUp {
+        scroll_settings(state, -10);
+        return Ok(false);
+    }
+    if settings_section_key(state, key) {
+        return Ok(false);
+    }
+    if state.settings_nav == crate::state::SETTINGS_HELP {
+        match key.code {
+            KeyCode::Esc => close_settings(state, true),
+            KeyCode::Down | KeyCode::Char('j') => scroll_settings(state, 1),
+            KeyCode::Up | KeyCode::Char('k') => scroll_settings(state, -1),
+            KeyCode::Home | KeyCode::Char('g') => state.help_scroll = 0,
+            KeyCode::End | KeyCode::Char('G') => state.help_scroll = state.help_scroll_max,
+            _ => {}
+        }
+        return Ok(false);
+    }
+    if save_target_key(state, key) {
+        toggle_save_target(state);
+        return Ok(false);
+    }
+    if let Some(ek) = map_editor_key(key) {
+        let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+        if state.theme_editor.is_some() {
+            dispatch_theme_editor(state, ek, shift);
+        } else {
+            dispatch_theme_picker(state, ek);
+        }
+    }
+    Ok(false)
 }
 
-fn open_theme_ui(state: &mut AppState) {
+fn settings_mouse(state: &mut AppState, mouse: MouseEvent) {
+    match mouse.kind {
+        MouseEventKind::ScrollUp => scroll_settings(state, -3),
+        MouseEventKind::ScrollDown => scroll_settings(state, 3),
+        MouseEventKind::Down(MouseButton::Left) => {
+            let _ = settings_nav_click(state, mouse.column, mouse.row);
+        }
+        _ => {}
+    }
+}
+
+fn editing_theme_hex(state: &AppState) -> bool {
+    state
+        .theme_editor
+        .as_ref()
+        .is_some_and(|editor| editor.editing_hex)
+}
+
+/// Tab, Shift-Tab, `[`, and `]` change the settings page.
+/// A hex field keeps the brackets. Tab still moves the section.
+fn settings_section_key(state: &mut AppState, key: KeyEvent) -> bool {
+    let Some(dir) = settings_section_dir(key) else {
+        return false;
+    };
+    let tab = matches!(key.code, KeyCode::Tab | KeyCode::BackTab);
+    if !tab && editing_theme_hex(state) {
+        return false;
+    }
+    let last = crate::state::SETTINGS_PAGES.len() as isize - 1;
+    let next = (state.settings_nav as isize + dir).clamp(0, last) as u8;
+    if next != state.settings_nav {
+        state.settings_nav = next;
+        state.help_scroll = 0;
+        state.settings_follow = true;
+    }
+    true
+}
+
+fn settings_section_dir(key: KeyEvent) -> Option<isize> {
+    if key.modifiers.contains(KeyModifiers::CONTROL)
+        && matches!(key.code, KeyCode::Tab | KeyCode::BackTab)
+    {
+        return None;
+    }
+    match key.code {
+        KeyCode::BackTab => Some(-1),
+        KeyCode::Tab => {
+            if key.modifiers.contains(KeyModifiers::SHIFT) {
+                Some(-1)
+            } else {
+                Some(1)
+            }
+        }
+        KeyCode::Char(']') => Some(1),
+        KeyCode::Char('[') => Some(-1),
+        _ => None,
+    }
+}
+
+fn save_target_key(state: &AppState, key: KeyEvent) -> bool {
+    if editing_theme_hex(state) || key.modifiers.contains(KeyModifiers::CONTROL) {
+        return false;
+    }
+    matches!(key.code, KeyCode::Char('t') | KeyCode::Char('T'))
+}
+
+fn toggle_save_target(state: &mut AppState) {
+    let from_editor = if let Some(editor) = state.theme_editor.as_mut() {
+        editor.save_target = editor.save_target.toggled();
+        Some(editor.save_target)
+    } else {
+        None
+    };
+    if let Some(target) = from_editor {
+        if let Some(picker) = state.theme_picker.as_mut() {
+            picker.save_target = target;
+        }
+        return;
+    }
+    if let Some(picker) = state.theme_picker.as_mut() {
+        picker.save_target = picker.save_target.toggled();
+    }
+}
+
+fn settings_nav_click(state: &mut AppState, col: u16, row: u16) -> bool {
+    let area = state.settings_nav_area;
+    if area.width == 0 || area.height == 0 {
+        return false;
+    }
+    let inside = col >= area.x
+        && row >= area.y
+        && col < area.x.saturating_add(area.width)
+        && row < area.y.saturating_add(area.height);
+    if !inside {
+        return false;
+    }
+    let rel = usize::from(row.saturating_sub(area.y));
+    if rel >= crate::state::SETTINGS_PAGES.len() {
+        return true;
+    }
+    state.settings_nav = rel as u8;
+    state.help_scroll = 0;
+    state.settings_follow = true;
+    true
+}
+
+fn scroll_settings(state: &mut AppState, delta: i32) {
+    state.settings_follow = false;
+    if delta < 0 {
+        state.help_scroll = state.help_scroll.saturating_sub(delta.unsigned_abs() as u16);
+    } else {
+        state.help_scroll = state
+            .help_scroll
+            .saturating_add(delta as u16)
+            .min(state.help_scroll_max);
+    }
+}
+
+fn open_settings(state: &mut AppState, nav: u8) {
+    state.show_settings = true;
+    state.settings_nav = nav.min(crate::state::SETTINGS_HELP);
+    state.help_scroll = 0;
+    state.settings_follow = true;
     let palette = crate::theme::palette_from_theme(&state.theme);
     let picker = ldnddev_theme::ThemePicker::new(
         palette.clone(),
@@ -1723,20 +1899,17 @@ fn open_theme_ui(state: &mut AppState) {
     );
     if picker.lists_omarchy() {
         state.theme_picker = Some(picker);
-        state.modal = Some(Modal::ThemePicker);
+        state.theme_editor = None;
     } else {
         state.theme_picker = None;
-        state.modal = Some(Modal::ThemeEditor(ldnddev_theme::ThemeEditor::new(
+        state.theme_editor = Some(ldnddev_theme::ThemeEditor::new(
             palette,
             crate::theme::extra_theme_fields(),
-        )));
+        ));
     }
 }
 
-fn handle_theme_picker(state: &mut AppState, key: KeyEvent) {
-    let Some(ek) = map_editor_key(key) else {
-        return;
-    };
+fn dispatch_theme_picker(state: &mut AppState, ek: ldnddev_theme::EditorKey) {
     let outcome = {
         let Some(picker) = state.theme_picker.as_mut() else {
             return;
@@ -1744,15 +1917,7 @@ fn handle_theme_picker(state: &mut AppState, key: KeyEvent) {
         picker.handle(ek)
     };
     match outcome {
-        ldnddev_theme::PickerOutcome::Applied => {
-            let palette = state
-                .theme_picker
-                .as_ref()
-                .map(|picker| picker.palette.clone());
-            if let Some(palette) = palette {
-                state.theme = crate::theme::theme_from_palette(palette);
-            }
-        }
+        ldnddev_theme::PickerOutcome::Applied => apply_picker_palette(state),
         ldnddev_theme::PickerOutcome::EditColors => {
             let editor = state.theme_picker.as_ref().map(|picker| {
                 let mut editor = ldnddev_theme::ThemeEditor::new(
@@ -1763,7 +1928,7 @@ fn handle_theme_picker(state: &mut AppState, key: KeyEvent) {
                 editor
             });
             if let Some(editor) = editor {
-                state.modal = Some(Modal::ThemeEditor(editor));
+                state.theme_editor = Some(editor);
             }
         }
         ldnddev_theme::PickerOutcome::RequestSave => {
@@ -1781,30 +1946,53 @@ fn handle_theme_picker(state: &mut AppState, key: KeyEvent) {
         ldnddev_theme::PickerOutcome::Error(msg) => {
             state.show_toast(ToastLevel::Error, msg);
         }
-        ldnddev_theme::PickerOutcome::Closed { .. } => close_theme(state, true),
-        ldnddev_theme::PickerOutcome::None => {}
+        ldnddev_theme::PickerOutcome::Closed { .. } => close_settings(state, true),
+        ldnddev_theme::PickerOutcome::None => {
+            if theme_motion(ek) {
+                preview_theme_row(state);
+                state.settings_follow = true;
+            }
+        }
     }
 }
 
-fn handle_theme_editor(state: &mut AppState, key: KeyEvent) {
-    let Some(ek) = map_editor_key(key) else {
-        return;
-    };
-    let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+fn apply_picker_palette(state: &mut AppState) {
+    let palette = state
+        .theme_picker
+        .as_ref()
+        .map(|picker| picker.palette.clone());
+    if let Some(palette) = palette {
+        state.theme = crate::theme::theme_from_palette(palette);
+    }
+}
+
+fn preview_theme_row(state: &mut AppState) {
     let outcome = {
-        let Some(Modal::ThemeEditor(editor)) = &mut state.modal else {
+        let Some(picker) = state.theme_picker.as_mut() else {
+            return;
+        };
+        picker.preview_selected()
+    };
+    match outcome {
+        ldnddev_theme::PickerOutcome::Applied => apply_picker_palette(state),
+        ldnddev_theme::PickerOutcome::Error(msg) => state.show_toast(ToastLevel::Error, msg),
+        _ => {}
+    }
+}
+
+fn dispatch_theme_editor(state: &mut AppState, ek: ldnddev_theme::EditorKey, shift: bool) {
+    let outcome = {
+        let Some(editor) = state.theme_editor.as_mut() else {
             return;
         };
         editor.handle(ek, shift)
     };
     match outcome {
         ldnddev_theme::EditorOutcome::PaletteChanged => {
-            let changed = match &state.modal {
-                Some(Modal::ThemeEditor(editor)) => {
-                    Some((editor.palette.clone(), editor.save_target))
-                }
-                _ => None,
-            };
+            let changed = state
+                .theme_editor
+                .as_ref()
+                .map(|editor| (editor.palette.clone(), editor.save_target));
             if let Some((palette, target)) = changed {
                 if let Some(picker) = state.theme_picker.as_mut() {
                     picker.palette = palette.clone();
@@ -1814,14 +2002,13 @@ fn handle_theme_editor(state: &mut AppState, key: KeyEvent) {
             }
         }
         ldnddev_theme::EditorOutcome::RequestSave => {
-            let saved = match &state.modal {
-                Some(Modal::ThemeEditor(editor)) => Some((
+            let saved = state.theme_editor.as_ref().map(|editor| {
+                (
                     editor.palette.clone(),
                     editor.save_target,
                     editor.fields.clone(),
-                )),
-                _ => None,
-            };
+                )
+            });
             if let Some((palette, target, fields)) = saved {
                 if let Err(err) = save_theme_palette(state, &palette, target, &fields) {
                     state.show_toast(ToastLevel::Error, format!("Save failed: {err}"));
@@ -1830,59 +2017,46 @@ fn handle_theme_editor(state: &mut AppState, key: KeyEvent) {
         }
         ldnddev_theme::EditorOutcome::Closed { .. } => {
             if state.theme_picker.is_some() {
-                let edited = match state.modal.take() {
-                    Some(Modal::ThemeEditor(editor)) => Some((editor.palette, editor.save_target)),
-                    other => {
-                        state.modal = other;
-                        None
-                    }
-                };
-                if let Some((palette, target)) = edited {
+                if let Some(editor) = state.theme_editor.take() {
                     if let Some(picker) = state.theme_picker.as_mut() {
-                        picker.palette = palette.clone();
-                        picker.save_target = target;
+                        picker.palette = editor.palette.clone();
+                        picker.save_target = editor.save_target;
                     }
-                    state.theme = crate::theme::theme_from_palette(palette);
+                    state.theme = crate::theme::theme_from_palette(editor.palette);
                 }
-                state.modal = Some(Modal::ThemePicker);
             } else {
-                let palette = match state.modal.take() {
-                    Some(Modal::ThemeEditor(editor)) => Some(editor.palette),
-                    other => {
-                        state.modal = other;
-                        None
-                    }
-                };
-                if let Some(palette) = palette {
-                    state.theme = crate::theme::theme_from_palette(palette);
-                }
-                state.theme_picker = None;
+                close_settings(state, true);
             }
         }
         ldnddev_theme::EditorOutcome::HexError(err) => {
             state.show_toast(ToastLevel::Error, format!("Invalid hex: {err}"));
         }
-        ldnddev_theme::EditorOutcome::None => {}
+        ldnddev_theme::EditorOutcome::None => {
+            let editing = editing_theme_hex(state);
+            if theme_motion(ek) && !editing {
+                state.settings_follow = true;
+            }
+        }
     }
 }
 
-fn scroll_theme(state: &mut AppState, delta: i32) {
-    if let Some(Modal::ThemeEditor(editor)) = state.modal.as_mut() {
-        let next = editor.selected as i32 + delta;
-        editor.select(next.max(0) as usize);
-        return;
-    }
-    if let Some(picker) = state.theme_picker.as_mut() {
-        let next = picker.selected as i32 + delta;
-        picker.select(next.max(0) as usize);
-    }
+fn theme_motion(key: ldnddev_theme::EditorKey) -> bool {
+    matches!(
+        key,
+        ldnddev_theme::EditorKey::Down
+            | ldnddev_theme::EditorKey::Up
+            | ldnddev_theme::EditorKey::Char('j')
+            | ldnddev_theme::EditorKey::Char('k')
+            | ldnddev_theme::EditorKey::Char('g')
+            | ldnddev_theme::EditorKey::Char('G')
+    )
 }
 
-fn close_theme(state: &mut AppState, revert: bool) {
+fn close_settings(state: &mut AppState, revert: bool) {
     if revert {
         let reverted = if let Some(picker) = state.theme_picker.as_ref() {
             Some(picker.revert_palette())
-        } else if let Some(Modal::ThemeEditor(editor)) = state.modal.as_mut() {
+        } else if let Some(editor) = state.theme_editor.as_mut() {
             editor.revert();
             Some(editor.palette.clone())
         } else {
@@ -1893,12 +2067,13 @@ fn close_theme(state: &mut AppState, revert: bool) {
         }
     }
     state.theme_picker = None;
-    if matches!(
-        state.modal,
-        Some(Modal::ThemePicker | Modal::ThemeEditor(_))
-    ) {
-        state.modal = None;
-    }
+    state.theme_editor = None;
+    state.show_settings = false;
+    state.settings_nav = 0;
+    state.help_scroll = 0;
+    state.help_scroll_max = 0;
+    state.settings_follow = false;
+    state.settings_nav_area = Rect::default();
 }
 
 fn theme_save_fields() -> Vec<ldnddev_theme::ColorField> {
@@ -1912,6 +2087,9 @@ fn theme_save_fields() -> Vec<ldnddev_theme::ColorField> {
 }
 
 fn map_editor_key(key: KeyEvent) -> Option<ldnddev_theme::EditorKey> {
+    if key.modifiers.contains(KeyModifiers::CONTROL) || key.modifiers.contains(KeyModifiers::ALT) {
+        return None;
+    }
     Some(match key.code {
         KeyCode::Up => ldnddev_theme::EditorKey::Up,
         KeyCode::Down => ldnddev_theme::EditorKey::Down,
@@ -1921,6 +2099,8 @@ fn map_editor_key(key: KeyEvent) -> Option<ldnddev_theme::EditorKey> {
         KeyCode::Enter => ldnddev_theme::EditorKey::Enter,
         KeyCode::Esc => ldnddev_theme::EditorKey::Esc,
         KeyCode::Backspace => ldnddev_theme::EditorKey::Backspace,
+        KeyCode::Home => ldnddev_theme::EditorKey::Char('g'),
+        KeyCode::End => ldnddev_theme::EditorKey::Char('G'),
         KeyCode::Char(c) => ldnddev_theme::EditorKey::Char(c),
         _ => return None,
     })
@@ -1954,8 +2134,7 @@ fn save_theme_palette(
         ToastLevel::Success,
         format!("Saved {} theme to {}", target.label(), path.display()),
     );
-    state.theme_picker = None;
-    state.modal = None;
+    close_settings(state, false);
     Ok(())
 }
 

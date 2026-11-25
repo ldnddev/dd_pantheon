@@ -26,6 +26,18 @@ fn demo_app() -> (App, PathBuf) {
 }
 
 #[test]
+fn bracketed_paste_fills_the_filter_in_one_insert() {
+    let (mut app, root) = demo_app();
+    app.handle_key(key(KeyCode::Char('/'))).expect("filter");
+    app.paste_text("ab\r\ncd\u{1b}e").expect("paste");
+    match &app.state.modal {
+        Some(Modal::Filter { query, .. }) => assert_eq!(query, "abcde"),
+        other => panic!("expected the filter modal, got {other:?}"),
+    }
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn demo_loads_three_sites() {
     let (app, root) = demo_app();
     assert!(app.state.demo);
@@ -82,20 +94,27 @@ fn enter_on_preview_toasts_demo_no_spawn() {
 }
 
 #[test]
-fn footer_starts_with_f1_then_f2_then_quit() {
+fn footer_starts_with_settings_then_quit() {
     let narrow = footer_keys(70);
-    assert!(narrow.starts_with("F1:Help"));
-    assert!(narrow.contains("F2:Theme"));
-    assert!(narrow.contains("C-q:Quit"));
+    assert!(narrow.starts_with("F1:Settings"), "{narrow}");
+    assert!(narrow.contains("^Q:Quit"), "{narrow}");
+    assert!(!narrow.contains("F1:Help"), "{narrow}");
+    assert!(!narrow.contains("F2"), "{narrow}");
     assert!(!narrow.contains("F4"));
 
     let medium = footer_keys(100);
+    assert!(medium.starts_with("F1: Settings"), "{medium}");
+    assert!(medium.contains("Ctrl+Q: Quit"), "{medium}");
+    assert!(!medium.contains("F2"), "{medium}");
     assert!(!medium.contains("F4"));
-    assert!(medium.contains("F1: Help"));
     let f1 = medium.find("F1").unwrap();
-    let f2 = medium.find("F2").unwrap();
+    let hint = medium.find("j/k").unwrap();
     let q = medium.find("Ctrl+Q: Quit").unwrap();
-    assert!(f1 < f2 && f2 < q);
+    assert!(f1 < hint && hint < q, "{medium}");
+
+    let wide = footer_keys(140);
+    assert!(wide.contains("F3: Doctor"), "{wide}");
+    assert!(wide.contains("Ctrl+Q: Quit"), "{wide}");
 }
 
 #[test]
@@ -233,12 +252,14 @@ fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
 }
 
 #[test]
-fn click_outside_help_closes_click_outside_quit_does_not() {
+fn click_outside_settings_does_not_close_quit_confirm_stays() {
     let (mut app, root) = demo_app();
-    app.state.modal = Some(Modal::Help { scroll: 0 });
-    app.state.modal_area = Some(ratatui::layout::Rect::new(10, 5, 40, 20));
-    app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 0, 0))
+    app.handle_key(key(KeyCode::F(1))).unwrap();
+    assert!(app.state.show_settings);
+    app.state.settings_nav_area = ratatui::layout::Rect::new(80, 3, 14, 20);
+    app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 0, 10))
         .unwrap();
+    assert!(app.state.show_settings);
     assert!(app.state.modal.is_none());
 
     app.state.modal = Some(Modal::QuitConfirm);
@@ -246,6 +267,46 @@ fn click_outside_help_closes_click_outside_quit_does_not() {
     app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 0, 0))
         .unwrap();
     assert!(matches!(app.state.modal, Some(Modal::QuitConfirm)));
+    assert!(app.state.show_settings);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn live_gate_ignores_f1_and_f2_and_keeps_ctrl_c() {
+    let (mut app, root) = demo_app();
+    app.state.modal = Some(Modal::LiveGate {
+        plan: dd_pantheon::plan::CommandPlan {
+            tool: dd_pantheon::plan::ToolKind::Terminus,
+            binary: std::path::PathBuf::from("terminus"),
+            argv: vec!["env:deploy".into(), "acme-wp.live".into()],
+            cwd: None,
+            why: "deploy code to acme-wp.live".into(),
+            safety: dd_pantheon::plan::SafetyTier::LiveGate,
+            target: dd_pantheon::plan::PlanTarget::Env {
+                site: "acme-wp".into(),
+                env: "live".into(),
+            },
+            dry_run: false,
+            timeout: None,
+            expects_json: false,
+            extra_env: Vec::new(),
+            redact: Vec::new(),
+            confirm_with_yes: true,
+        },
+        expected: "live".into(),
+        typed: "li".into(),
+    });
+    app.handle_key(key(KeyCode::F(1))).unwrap();
+    app.handle_key(key(KeyCode::F(2))).unwrap();
+    assert!(!app.state.show_settings);
+    match &app.state.modal {
+        Some(Modal::LiveGate { typed, .. }) => assert_eq!(typed, "li"),
+        other => panic!("gate swallowed: {other:?}"),
+    }
+    let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+    app.handle_key(ctrl_c).unwrap();
+    assert!(matches!(app.state.modal, Some(Modal::LiveGate { .. })));
+    assert!(!app.state.show_settings);
     let _ = fs::remove_dir_all(root);
 }
 

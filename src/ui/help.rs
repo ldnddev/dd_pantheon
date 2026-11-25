@@ -1,130 +1,150 @@
 use crate::state::AppState;
-use ratatui::Frame;
-use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
-pub fn draw(f: &mut Frame, state: &AppState, area: Rect, scroll: u16) {
-    let mut lines: Vec<Line> = Vec::new();
+pub fn lines(state: &AppState, width: usize) -> Vec<Line<'static>> {
+    let mut lines: Vec<Line<'static>> = Vec::new();
     push_header(&mut lines, state, "Global");
-    lines.push(line("F1 / ?", "Help"));
-    lines.push(line("F2", "Omarchy themes (Enter apply, e edit, s save)"));
-    lines.push(line("F3", "Doctor (refresh via job runner)"));
-    lines.push(line("Ctrl+Q", "Quit"));
-    lines.push(line("Tab / S-Tab", "Cycle panes"));
-    lines.push(line("Esc", "Close modal / clear filter"));
-    lines.push(line(
+    push_entry(&mut lines, "F1 / F2", "Settings", width);
+    push_entry(&mut lines, "Ctrl+Q", "Quit", width);
+    push_entry(&mut lines, "F3", "Doctor (refresh via job runner)", width);
+    push_entry(&mut lines, "?", "Settings, Help page", width);
+    push_entry(&mut lines, "Tab / S-Tab", "Cycle panes (sheet: change page)", width);
+    push_entry(&mut lines, "Esc", "Close settings / clear filter", width);
+    push_entry(
+        &mut lines,
         "/",
         "Filter sites by name or tag (modal list; Enter jumps)",
-    ));
-    lines.push(line(
+        width,
+    );
+    push_entry(
+        &mut lines,
         ":",
         "Terminus/Lando commands as selected (type `lando` to filter; non-init Lando is grayed without a Pantheon .lando.yml)",
-    ));
-    lines.push(line("Ctrl+K", "Palette"));
-    lines.push(line("Ctrl+L", "Login (machine token)"));
-    lines.push(line("Actions", "Logout when logged in (Mutating)"));
-    lines.push(line("Ctrl+C", "Cancel running job"));
+        width,
+    );
+    push_entry(&mut lines, "Ctrl+K", "Palette", width);
+    push_entry(&mut lines, "Ctrl+L", "Login (machine token)", width);
+    push_entry(&mut lines, "Actions", "Logout when logged in (Mutating)", width);
+    push_entry(&mut lines, "Ctrl+C", "Cancel running job", width);
 
     push_header(&mut lines, state, "Tree");
-    lines.push(line("j/k ↑↓", "Move"));
-    lines.push(line("PgUp/PgDn", "Page"));
-    lines.push(line("h/l", "Expand / collapse"));
-    lines.push(line("g / G  Home/End", "Top / bottom"));
-    lines.push(line("Enter", "Expand site / keep env selected"));
-    lines.push(line("r", "Refresh inventory + metrics + backups (live)"));
-    lines.push(line("b", "Stage backup:create (env row; Enter runs)"));
-    lines.push(line(
+    push_entry(&mut lines, "j/k ↑↓", "Move", width);
+    push_entry(&mut lines, "PgUp/PgDn", "Page", width);
+    push_entry(&mut lines, "h/l", "Expand / collapse", width);
+    push_entry(&mut lines, "g / G  Home/End", "Top / bottom", width);
+    push_entry(&mut lines, "Enter", "Expand site / keep env selected", width);
+    push_entry(
+        &mut lines,
+        "r",
+        "Refresh inventory + metrics + backups (live)",
+        width,
+    );
+    push_entry(&mut lines, "b", "Stage backup:create (env row; Enter runs)", width);
+    push_entry(
+        &mut lines,
         ":",
         "Restore backup / backup URL via palette (get prints URL, no download)",
-    ));
-    lines.push(line(
+        width,
+    );
+    push_entry(
+        &mut lines,
         "e",
         "Deploy: git-mode on dev; test/live open a --note form (sync-content on test)",
-    ));
-    lines.push(line(
+        width,
+    );
+    push_entry(
+        &mut lines,
         "c",
         "Stage env:clear-cache (tree/inspector; not preview)",
-    ));
-    lines.push(line("s / S", "lando start / stop (local bound)"));
-    lines.push(line("/", "Filter sites (name / tag)"));
-    lines.push(line("T", "Tag filter picker (again clears)"));
-    lines.push(line("a", "Add tag"));
-    lines.push(line("n", "Create site wizard (org + name + upstream)"));
-    lines.push(line(
+        width,
+    );
+    push_entry(&mut lines, "s / S", "lando start / stop (local bound)", width);
+    push_entry(&mut lines, "/", "Filter sites (name / tag)", width);
+    push_entry(&mut lines, "T", "Tag filter picker (again clears)", width);
+    push_entry(&mut lines, "a", "Add tag", width);
+    push_entry(&mut lines, "n", "Create site wizard (org + name + upstream)", width);
+    push_entry(
+        &mut lines,
         "(no W)",
         "Wipe is palette-only (backup-first; live is LiveGate)",
-    ));
-    lines.push(line(
+        width,
+    );
+    push_entry(
+        &mut lines,
         ":",
         "domains / HTTPS / lock via palette (password redacted)",
-    ));
-    lines.push(line("x", "Remove selected tag chip (inspector)"));
-    lines.push(line("[ / ]", "Cycle tag chips (inspector)"));
+        width,
+    );
+    push_entry(&mut lines, "x", "Remove selected tag chip (inspector)", width);
+    push_entry(&mut lines, "[ / ]", "Cycle tag chips (inspector)", width);
 
     push_header(&mut lines, state, "Inspector");
-    lines.push(line("j/k  PgUp/PgDn", "Scroll inspector"));
-    lines.push(line("g / G  Home/End", "Inspector top / bottom"));
-    lines.push(line("Enter", "Run the staged plan (same as preview)"));
-    lines.push(line(
+    push_entry(&mut lines, "j/k  PgUp/PgDn", "Scroll inspector", width);
+    push_entry(&mut lines, "g / G  Home/End", "Inspector top / bottom", width);
+    push_entry(&mut lines, "Enter", "Run the staged plan (same as preview)", width);
+    push_entry(
+        &mut lines,
         "d / w / Shift+M",
         "Metrics period (env row; m is CMS)",
-    ));
-    lines.push(line("m", "CMS form (remote/local; never month)"));
+        width,
+    );
+    push_entry(&mut lines, "m", "CMS form (remote/local; never month)", width);
 
     push_header(&mut lines, state, "Preview / log");
-    lines.push(line(
+    push_entry(
+        &mut lines,
         "Enter",
         "PROCESS COMMAND — run plan (gates apply; --demo never spawns)",
-    ));
-    lines.push(line(
+        width,
+    );
+    push_entry(
+        &mut lines,
         "y",
         "COPY TO CLIPBOARD (redacted argv; preview focus)",
-    ));
-    lines.push(line(
+        width,
+    );
+    push_entry(
+        &mut lines,
         "Esc",
         "CANCEL staged plan when filter is already clear",
-    ));
-    lines.push(line("c", "no-op in preview (not copy, not clear-cache)"));
-    lines.push(line("j/k", "Scroll"));
-    lines.push(line(
+        width,
+    );
+    push_entry(&mut lines, "c", "no-op in preview (not copy, not clear-cache)", width);
+    push_entry(&mut lines, "j/k", "Scroll", width);
+    push_entry(
+        &mut lines,
         "Enter / e",
         "Expand job log to a full-size modal (Esc closes)",
-    ));
-    lines.push(line("g / G", "Log top / bottom"));
-    lines.push(line("PgUp / PgDn", "Log page"));
-    lines.push(line(
+        width,
+    );
+    push_entry(&mut lines, "g / G", "Log top / bottom", width);
+    push_entry(&mut lines, "PgUp / PgDn", "Log page", width);
+    push_entry(
+        &mut lines,
         "click",
         "Process / Copy / Cancel buttons in command preview",
-    ));
-    lines.push(line("click log", "Focus; click again to expand"));
+        width,
+    );
+    push_entry(&mut lines, "click log", "Focus; click again to expand", width);
 
     push_header(&mut lines, state, "Mouse");
-    lines.push(line(
+    push_entry(
+        &mut lines,
         "click",
         "Focus pane / select tree row / period labels",
-    ));
-    lines.push(line("wheel", "Scroll hovered pane"));
-    lines.push(line(
+        width,
+    );
+    push_entry(&mut lines, "wheel", "Scroll hovered pane", width);
+    push_entry(
+        &mut lines,
         "click outside",
-        "Close Help, Doctor, Filter, Palette, log overlay",
-    ));
-
-    let p = Paragraph::new(lines)
-        .wrap(Wrap { trim: false })
-        .scroll((scroll, 0))
-        .block(
-            Block::default()
-                .title("F1 Help")
-                .borders(Borders::ALL)
-                .border_style(state.theme.active_border)
-                .style(state.theme.modal),
-        )
-        .style(state.theme.modal_text);
-    f.render_widget(p, area);
+        "Close Doctor, Filter, Palette, log overlay",
+        width,
+    );
+    lines
 }
 
-fn push_header(lines: &mut Vec<Line>, state: &AppState, title: &str) {
+fn push_header(lines: &mut Vec<Line<'static>>, state: &AppState, title: &str) {
     if !lines.is_empty() {
         lines.push(Line::from(""));
     }
@@ -134,6 +154,52 @@ fn push_header(lines: &mut Vec<Line>, state: &AppState, title: &str) {
     )));
 }
 
-fn line<'a>(key: &'a str, desc: &'a str) -> Line<'a> {
-    Line::from(vec![Span::raw(format!("  {key:<16}")), Span::raw(desc)])
+fn push_entry(lines: &mut Vec<Line<'static>>, key: &str, desc: &str, width: usize) {
+    let prefix = format!("  {key:<16}");
+    let prefix_w = prefix.chars().count();
+    if width <= prefix_w.saturating_add(4) {
+        lines.push(Line::from(format!("{prefix}{desc}")));
+        return;
+    }
+    let budget = width - prefix_w;
+    let mut rest = desc;
+    let mut first = true;
+    loop {
+        if rest.is_empty() {
+            if first {
+                lines.push(Line::from(prefix));
+            }
+            break;
+        }
+        let take = if first {
+            budget
+        } else {
+            width.saturating_sub(2).max(1)
+        };
+        let (chunk, next) = split_chars(rest, take);
+        if chunk.is_empty() {
+            break;
+        }
+        if first {
+            lines.push(Line::from(format!("{prefix}{chunk}")));
+            first = false;
+        } else {
+            lines.push(Line::from(format!("  {chunk}")));
+        }
+        rest = next;
+    }
+}
+
+fn split_chars(text: &str, n: usize) -> (&str, &str) {
+    if n == 0 {
+        return ("", text);
+    }
+    let mut count = 0;
+    for (i, _) in text.char_indices() {
+        if count == n {
+            return (&text[..i], &text[i..]);
+        }
+        count += 1;
+    }
+    (text, "")
 }

@@ -6,8 +6,8 @@ mod log;
 mod metrics;
 mod modals;
 mod preview;
+mod settings;
 mod shell;
-mod theme_modal;
 mod tree;
 
 pub use shell::footer_keys;
@@ -46,6 +46,12 @@ pub fn draw(f: &mut Frame, state: &mut AppState) {
     log::draw(f, state, panes.log);
     shell::draw_footer(f, state, outer[2]);
 
+    if state.show_settings {
+        settings::draw(f, state, outer[1]);
+    } else {
+        state.settings_nav_area = Rect::default();
+    }
+
     if state.modal.is_some() {
         draw_modal(f, state, f.area());
     } else {
@@ -82,30 +88,13 @@ fn draw_modal(f: &mut Frame, state: &mut AppState, area: Rect) {
     state.modal_area = Some(modal_area);
     f.render_widget(Clear, modal_area);
 
-    if matches!(state.modal, Some(Modal::ThemeEditor(_))) {
-        theme_modal::draw(f, state, modal_area);
-        return;
-    }
-    if matches!(state.modal, Some(Modal::ThemePicker)) {
-        theme_modal::draw_picker(f, state, modal_area);
-        return;
-    }
     if matches!(state.modal, Some(Modal::LogExpand)) {
         log::draw_expanded(f, state, modal_area);
         return;
     }
-    if let Some(scroll) = match &state.modal {
-        Some(Modal::Help { scroll }) => Some(*scroll),
-        _ => None,
-    } {
-        help::draw(f, state, modal_area, scroll);
-        return;
-    }
 
     match state.modal.clone() {
-        Some(
-            Modal::Help { .. } | Modal::ThemePicker | Modal::ThemeEditor(_) | Modal::LogExpand,
-        ) => {}
+        Some(Modal::LogExpand) => {}
         Some(Modal::Doctor { scroll }) => {
             let body = crate::doctor::render(
                 &state.tools,

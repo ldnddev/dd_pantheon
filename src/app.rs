@@ -1,7 +1,7 @@
 use crate::catalog::parse_terminus_list;
 use crate::config::ConfigStore;
 use crate::fixtures::demo_data;
-use crate::input::{handle_key, handle_mouse};
+use crate::input::{handle_key, handle_mouse, paste_text};
 use crate::jobs::{JobEvent, JobKind, JobStatus, Stream};
 use crate::plan::{PlanTarget, StagedPlan};
 use crate::state::AppState;
@@ -103,6 +103,10 @@ impl App {
 
     pub fn handle_key(&mut self, key: KeyEvent) -> Result<bool> {
         handle_key(&mut self.state, key)
+    }
+
+    pub fn paste_text(&mut self, raw: &str) -> Result<()> {
+        paste_text(&mut self.state, raw)
     }
 
     pub fn handle_mouse(&mut self, mouse: MouseEvent) -> Result<bool> {
