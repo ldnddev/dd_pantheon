@@ -23,7 +23,7 @@
 #   BINDIR=/path/to/bin            # wins over PREFIX
 #   XDG_CONFIG_HOME=$HOME/.config  # theme at …/ldnddev/dd_pantheon_theme.yml
 #   XDG_DATA_HOME=$HOME/.local/share
-#   VERSION=latest                 # or v0.3.8 / 0.3.8
+#   VERSION=latest                 # or v0.3.9 / 0.3.9
 #   DD_PANTHEON_REPO=ldnddev/dd_pantheon
 #   GITHUB_TOKEN=…                 # optional; raises GitHub API rate limits
 #   INSTALL_GUI=1                  # same as --both, when no --tui/--gui/--both flag
