@@ -142,6 +142,24 @@ pub fn rows() -> &'static [Shortcut] {
             tui: "d/w/M",
         },
         Shortcut {
+            section: "Preview",
+            action: "Process",
+            gui: "Enter",
+            tui: "Enter",
+        },
+        Shortcut {
+            section: "Preview",
+            action: "Copy",
+            gui: "y",
+            tui: "y",
+        },
+        Shortcut {
+            section: "Log",
+            action: "Expand",
+            gui: "Enter",
+            tui: "Enter",
+        },
+        Shortcut {
             section: "Themes",
             action: "Save theme",
             gui: "y",

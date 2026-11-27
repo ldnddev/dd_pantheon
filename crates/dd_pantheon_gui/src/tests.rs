@@ -26,13 +26,16 @@ fn body_lists_the_demo_sites(cx: &mut TestAppContext) {
         assert!(text.contains("framework WordPress"), "{text}");
         assert!(text.contains("tags [prod] [client-acme]"), "{text}");
         assert!(text.contains("runtime 8.3"), "{text}");
-        assert!(text.contains("https://test-acme-wp.pantheonsite.io"), "{text}");
-        assert!(text.contains("header:DEMO acme-wp.test"), "{text}");
-        assert!(text.contains("focus:tree"), "{text}");
         assert!(
-            text.contains("footer:F1: Settings  F3: Doctor"),
+            text.contains("https://test-acme-wp.pantheonsite.io"),
             "{text}"
         );
+        assert!(text.contains("series "), "{text}");
+        assert!(text.contains("backup:create"), "{text}");
+        assert!(text.contains("header:DEMO acme-wp.test"), "{text}");
+        assert!(text.contains("focus:tree"), "{text}");
+        assert!(text.contains("footer:F1: Settings  F3: Doctor"), "{text}");
+        assert!(text.contains("Ctrl+Q: Quit"), "{text}");
         assert!(!text.contains("settings-panel"), "{text}");
         assert!(shell.app.state.demo);
         assert!(shell.app.state.skip_detect);
@@ -87,6 +90,7 @@ fn settings_sheet_pages_revert_and_restore_the_palette(cx: &mut TestAppContext) 
             closed.contains("footer:F1: Settings  F3: Doctor"),
             "{closed}"
         );
+        assert!(closed.contains("Ctrl+Q: Quit"), "{closed}");
     });
 }
 
@@ -200,6 +204,14 @@ fn phase_panes_filter_and_palette_do_not_spawn(cx: &mut TestAppContext) {
         let form = shell.visible_text();
         assert!(form.contains("env:wipe"), "{form}");
         assert!(form.contains("site_env frozen-lab.dev"), "{form}");
+        shell.click_modal_line(2);
+        let focus = match &shell.app.state.modal {
+            Some(dd_pantheon::state::Modal::Palette {
+                form: Some(form), ..
+            }) => form.focus,
+            other => panic!("palette form still open: {other:?}"),
+        };
+        assert_eq!(focus, 1);
         shell.handle_key("enter");
         let staged = shell.visible_text();
         assert!(
@@ -383,4 +395,38 @@ fn quit_is_ctrl_q_and_the_tree_moves(cx: &mut TestAppContext) {
         shell.handle_key("ctrl-q");
         assert!(shell.quit_requested());
     });
+}
+
+#[gpui::test]
+fn phase_tag_chips_and_inspector_scroll(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let shell = mount(cx, dir.path());
+    shell.update(cx, |shell, _| {
+        assert_eq!(present_title(&shell.app.state), "Available sites (3)");
+        shell.click_tag("prod", false);
+        assert_eq!(shell.app.state.tag_filter.as_deref(), Some("prod"));
+        assert!(shell.app.state.focus == dd_pantheon::state::FocusPane::Inspector);
+        let titled = present_title(&shell.app.state);
+        assert!(titled.contains("tag:prod"), "{titled}");
+        assert!(
+            !shell.visible_text().contains("frozen-lab"),
+            "{}",
+            shell.visible_text()
+        );
+        assert!(shell.app.state.jobs.is_empty());
+
+        shell.app.state.selected_chip = Some("prod".into());
+        shell.click_tag("prod", true);
+        let removed = shell.visible_text();
+        assert!(removed.contains("toast:demo: no spawn"), "{removed}");
+        assert!(shell.app.state.jobs.is_empty());
+        assert!(shell.visible_text().contains("focus:inspector"));
+        let before = shell.app.state.inspector_scroll;
+        shell.handle_key("j");
+        assert!(shell.app.state.inspector_scroll > before);
+    });
+}
+
+fn present_title(state: &dd_pantheon::state::AppState) -> String {
+    crate::present::tree_title(state)
 }
