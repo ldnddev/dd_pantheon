@@ -22,9 +22,15 @@ fn body_lists_the_demo_sites(cx: &mut TestAppContext) {
         assert!(text.contains("frozen-lab"), "{text}");
         assert!(text.contains("prod"), "{text}");
         assert!(text.contains("client-acme"), "{text}");
-        assert!(text.contains("> acme-wp test"), "{text}");
+        assert!(text.contains(">     ▪ test  git"), "{text}");
+        assert!(text.contains("framework WordPress"), "{text}");
+        assert!(text.contains("tags [prod] [client-acme]"), "{text}");
+        assert!(text.contains("runtime 8.3"), "{text}");
+        assert!(text.contains("https://test-acme-wp.pantheonsite.io"), "{text}");
+        assert!(text.contains("header:DEMO acme-wp.test"), "{text}");
+        assert!(text.contains("focus:tree"), "{text}");
         assert!(
-            text.contains("footer:F1: Settings  Ctrl+Q: Quit"),
+            text.contains("footer:F1: Settings  F3: Doctor"),
             "{text}"
         );
         assert!(!text.contains("settings-panel"), "{text}");
@@ -78,7 +84,7 @@ fn settings_sheet_pages_revert_and_restore_the_palette(cx: &mut TestAppContext) 
         assert!(!closed.contains("settings-panel"), "{closed}");
         assert_eq!(shell.palette_hex("base_background"), before);
         assert!(
-            closed.contains("footer:F1: Settings  Ctrl+Q: Quit"),
+            closed.contains("footer:F1: Settings  F3: Doctor"),
             "{closed}"
         );
     });

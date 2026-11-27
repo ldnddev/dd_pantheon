@@ -1,3 +1,5 @@
+pub use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
 pub mod app;
 pub mod catalog;
 pub mod clipboard;

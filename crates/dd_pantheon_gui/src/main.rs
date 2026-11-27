@@ -1,6 +1,8 @@
 //! dd_pantheon window. The terminal crate stays the source of behavior.
 
+mod keys;
 mod prefs;
+mod present;
 mod shell;
 mod shortcuts;
 mod windows;

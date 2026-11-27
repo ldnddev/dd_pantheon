@@ -6,19 +6,21 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use dd_pantheon::app::{App as PantheonApp, LaunchOpts};
-use dd_pantheon::state::{AppState, TreeRow};
+use dd_pantheon::state::{FocusPane, Modal};
 use dd_pantheon::theme::{self, THEME_FILE_NAME};
 use gpui::{
     App, ClickEvent, Context, FocusHandle, Focusable, FontWeight, Hsla, InteractiveElement,
-    IntoElement, KeyDownEvent, ParentElement, Render, Rgba, ScrollHandle, StatefulInteractiveElement,
-    Styled, Window, div, prelude::*, px, relative,
+    IntoElement, KeyDownEvent, ParentElement, Render, Rgba, ScrollHandle,
+    StatefulInteractiveElement, Styled, Window, div, prelude::*, px, relative,
 };
 use ldnddev_theme::{
     EditorKey, EditorOutcome, PickerOutcome, PickerRow, ThemeEditor, ThemePicker, ThemeSaveTarget,
 };
 
 use crate::RunOpts;
+use crate::keys::{self, vim_motion};
 use crate::prefs::{self, Density, GuiSettings};
+use crate::present;
 use crate::shortcuts;
 
 const BARS: [&str; 4] = ["▃", "▅", "█", "▅"];
@@ -98,7 +100,6 @@ pub struct Shell {
     settings_row: usize,
     settings_query: String,
     settings_query_on: bool,
-    doctor_open: bool,
     quit: bool,
     quit_runtime: bool,
     note: String,
@@ -135,7 +136,8 @@ impl Shell {
         };
         let palette = theme::palette_from_theme(&app.state.theme);
         let gui = prefs::load_from(&boot.gui_path);
-        Self {
+        let quit_runtime = boot.quit_runtime;
+        let mut shell = Self {
             focus: cx.focus_handle(),
             app,
             palette,
@@ -147,14 +149,62 @@ impl Shell {
             settings_row: 0,
             settings_query: String::new(),
             settings_query_on: false,
-            doctor_open: false,
             quit: false,
-            quit_runtime: boot.quit_runtime,
+            quit_runtime,
             note: String::new(),
             settings_scroll: ScrollHandle::new(),
             tree_scroll: ScrollHandle::new(),
             booted_at: Instant::now(),
+        };
+        shell.arm_areas();
+        if quit_runtime {
+            shell.spawn_tick(cx);
         }
+        shell
+    }
+
+    /// Page keys use the terminal's pane height. The window has no cell grid.
+    fn arm_areas(&mut self) {
+        self.app.state.tree_area.width = 40;
+        self.app.state.tree_area.height = 24;
+        self.app.state.inspector_area.width = 64;
+        self.app.state.inspector_area.height = 18;
+        self.app.state.preview_area.width = 64;
+        self.app.state.preview_area.height = 10;
+        self.app.state.log_area.width = 64;
+        self.app.state.log_area.height = 12;
+        let mut modal = self.app.state.tree_area;
+        modal.width = 80;
+        modal.height = 24;
+        self.app.state.modal_area = Some(modal);
+    }
+
+    fn spawn_tick(&self, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            loop {
+                let wait = this
+                    .update(cx, |shell, _| {
+                        shell
+                            .app
+                            .next_poll_timeout()
+                            .unwrap_or(Duration::from_secs(60))
+                    })
+                    .unwrap_or(Duration::from_secs(60));
+                cx.background_executor().timer(wait).await;
+                let stop = this
+                    .update(cx, |shell, cx| {
+                        if shell.app.tick() {
+                            cx.notify();
+                        }
+                        shell.quit
+                    })
+                    .unwrap_or(true);
+                if stop {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
 
     #[cfg(test)]
@@ -181,26 +231,12 @@ impl Shell {
 
     #[cfg(test)]
     pub fn visible_text(&self) -> String {
-        let mut lines = Vec::new();
-        lines.push("dd_pantheon".to_string());
+        let mut lines = present::cockpit(&self.app.state, &self.footer_line());
         if self.app.state.job_running {
-            lines.push(busy_label(self.booted_at.elapsed()));
+            lines.insert(1, busy_label(self.booted_at.elapsed()));
         }
-        lines.push(format!("footer:{}", self.footer_line()));
         if !self.note.is_empty() {
-            lines.push(self.note.clone());
-        }
-        lines.extend(self.tree_lines());
-        if self.doctor_open {
-            lines.push(
-                dd_pantheon::doctor::render(
-                    &self.app.state.tools,
-                    &self.app.state.auth,
-                    &self.app.state.catalog,
-                    &self.app.state.doctor_warnings,
-                )
-                .to_string(),
-            );
+            lines.insert(1, self.note.clone());
         }
         if self.appearance.is_some() {
             lines.extend(self.settings_lines());
@@ -212,19 +248,12 @@ impl Shell {
         if self.appearance.is_some() {
             "F1: Settings  Esc: Close  Ctrl+Q: Quit".to_string()
         } else {
-            "F1: Settings  Ctrl+Q: Quit".to_string()
+            dd_pantheon::ui::footer_text(&self.app.state, 160)
         }
     }
 
     fn tree_lines(&self) -> Vec<String> {
-        let selected = self.app.state.tree_state.selected();
-        self.app
-            .state
-            .tree_rows
-            .iter()
-            .enumerate()
-            .map(|(index, row)| tree_line(&self.app.state, row, selected == Some(index)))
-            .collect()
+        present::tree_lines(&self.app.state)
     }
 
     #[cfg(test)]
@@ -244,12 +273,12 @@ impl Shell {
         lines.push(format!("settings-page:{page}"));
         lines.push("Settings".to_string());
         for (index, label) in SETTINGS_NAV.iter().enumerate() {
-            let mark = if self.settings_query.trim().is_empty() && self.settings_nav as usize == index
-            {
-                ">"
-            } else {
-                " "
-            };
+            let mark =
+                if self.settings_query.trim().is_empty() && self.settings_nav as usize == index {
+                    ">"
+                } else {
+                    " "
+                };
             lines.push(format!("{mark} {label}"));
         }
         if !self.settings_query.trim().is_empty() {
@@ -286,10 +315,7 @@ impl Shell {
             .clone()
             .unwrap_or_else(|| "OK (loaded cleanly)".to_string());
         lines.push(format!("Status: {status}"));
-        lines.push(format!(
-            "Save to {}",
-            appearance.picker.save_target.label()
-        ));
+        lines.push(format!("Save to {}", appearance.picker.save_target.label()));
         if let Some(editor) = &appearance.editor {
             lines.push("Theme color editor".to_string());
             for (index, field) in editor.fields.iter().enumerate() {
@@ -323,28 +349,222 @@ impl Shell {
     pub fn handle_key(&mut self, key: &str) {
         let key = key.to_ascii_lowercase();
         if key == "ctrl-q" {
-            self.quit = true;
+            self.forward(&key);
+            self.sync_quit();
+            return;
+        }
+        // A gate, confirm, or any other terminal modal owns the key. Settings
+        // must not swallow LiveGate, a destructive confirm, or the quit prompt.
+        if self.app.state.modal.is_some() {
+            self.forward(&key);
+            self.sync_quit();
             return;
         }
         if self.appearance.is_some() {
             self.settings_key(&key);
             return;
         }
-        if self.doctor_open {
-            if key == "escape" || key == "f3" {
-                self.doctor_open = false;
-            }
-            return;
-        }
         if matches!(key.as_str(), "f1" | "f2" | "ctrl-/" | "ctrl-,") {
             self.open_settings();
             return;
         }
-        if key == "f3" {
-            self.open_doctor();
+        if key == "?" || key == "shift-/" {
+            self.open_settings();
+            self.settings_nav = 2;
             return;
         }
-        self.body_key(&key);
+        if !self.gui.vim_keys && vim_motion(&key) {
+            return;
+        }
+        self.forward(&key);
+        self.sync_quit();
+    }
+
+    pub fn paste(&mut self, raw: &str) {
+        if self.appearance.is_some() {
+            if self.editing_hex() {
+                for ch in raw.chars().filter(|ch| ch.is_ascii_hexdigit()) {
+                    self.editor_key(&ch.to_ascii_lowercase().to_string());
+                }
+            } else if self.settings_query_on {
+                for ch in raw.chars().filter(|ch| !ch.is_control()) {
+                    self.settings_query.push(ch);
+                }
+                self.settings_row = 0;
+            }
+            return;
+        }
+        if let Err(err) = self.app.paste_text(raw) {
+            self.note = err.to_string();
+        }
+    }
+
+    fn forward(&mut self, key: &str) {
+        let Some(event) = keys::to_key_event(key) else {
+            return;
+        };
+        match self.app.handle_key(event) {
+            Ok(quit) => {
+                if quit {
+                    self.app.state.should_quit = true;
+                    self.quit = true;
+                }
+            }
+            Err(err) => self.note = err.to_string(),
+        }
+    }
+
+    fn sync_quit(&mut self) {
+        if self.app.state.should_quit {
+            self.quit = true;
+        }
+    }
+
+    /// Same exclusion list as the terminal's shared letter keys.
+    pub fn activate_action(&mut self, id: &str) {
+        let staged = dd_pantheon::workflows::stage_action(&mut self.app.state, id);
+        if staged && !matches!(id, "r" | "n" | "m" | "a" | "cms" | "create") {
+            dd_pantheon::workflows::request_run(&mut self.app.state);
+        }
+        self.sync_quit();
+    }
+
+    pub fn preview_click(&mut self, button: &str) {
+        self.app.state.focus = FocusPane::Preview;
+        match button {
+            "process" => dd_pantheon::workflows::request_run(&mut self.app.state),
+            "copy" => self.forward("y"),
+            "cancel" => {
+                dd_pantheon::workflows::cancel_preview_or_job(&mut self.app.state);
+            }
+            _ => {}
+        }
+    }
+
+    /// Palette field rows and the CMS command take a click the way the terminal does.
+    pub fn click_modal_line(&mut self, index: usize) {
+        match &mut self.app.state.modal {
+            Some(Modal::Palette {
+                form: Some(form), ..
+            }) => {
+                let field = index.saturating_sub(1);
+                if field < form.field_count() {
+                    form.focus = field;
+                }
+            }
+            Some(Modal::Cms { form }) => {
+                form.focus = dd_pantheon::state::CmsFocus::Command;
+            }
+            _ => {}
+        }
+    }
+
+    /// Body pins the tag filter. The × on the selected chip stages removal.
+    pub fn click_tag(&mut self, name: &str, close: bool) {
+        self.focus_pane(FocusPane::Inspector);
+        if close {
+            dd_pantheon::workflows::tags::stage_remove(&mut self.app.state, name);
+        } else {
+            self.app.state.selected_chip = Some(name.to_string());
+            dd_pantheon::workflows::tags::pin_filter(&mut self.app.state, name.to_string());
+        }
+    }
+
+    fn window_inspector(&mut self) -> Vec<String> {
+        let lines: Vec<String> = present::inspector_lines(&self.app.state)
+            .into_iter()
+            .filter(|line| !line.starts_with("tags ["))
+            .collect();
+        let rows = self.app.state.inspector_area.height.max(1);
+        let clamped = present::clamp_scroll(self.app.state.inspector_scroll, lines.len(), rows);
+        self.app.state.inspector_scroll = clamped;
+        present::page_lines(&lines, clamped, rows)
+    }
+
+    fn window_preview(&mut self) -> Vec<String> {
+        let lines = present::preview_lines(&self.app.state);
+        let rows = self.app.state.preview_area.height.max(1);
+        let clamped = present::clamp_scroll(self.app.state.preview_scroll, lines.len(), rows);
+        self.app.state.preview_scroll = clamped;
+        present::page_lines(&lines, clamped, rows)
+    }
+
+    fn page_modal(&mut self, lines: Vec<String>) -> Vec<String> {
+        let Some(scroll) = self.app.state.modal.as_ref().and_then(|modal| match modal {
+            Modal::Doctor { scroll } => Some(*scroll),
+            _ => None,
+        }) else {
+            return lines;
+        };
+        let rows = self
+            .app
+            .state
+            .modal_area
+            .map(|area| area.height)
+            .unwrap_or(24)
+            .max(1);
+        let body_rows = rows.saturating_sub(1).max(1);
+        let body_len = lines.len().saturating_sub(1);
+        let clamped = present::clamp_scroll(scroll, body_len, body_rows);
+        if let Some(Modal::Doctor { scroll }) = &mut self.app.state.modal {
+            *scroll = clamped;
+        }
+        if clamped == 0 || lines.is_empty() {
+            return lines;
+        }
+        let mut lines = lines;
+        let title = lines.remove(0);
+        let mut out = vec![title];
+        out.extend(present::page_lines(&lines, clamped, body_rows));
+        out
+    }
+
+    pub fn dismiss_outside(&mut self) {
+        if self
+            .app
+            .state
+            .modal
+            .as_ref()
+            .is_some_and(Modal::dismiss_on_click_outside)
+        {
+            self.app.state.modal = None;
+        }
+    }
+
+    fn focus_pane(&mut self, pane: FocusPane) {
+        self.app.state.focus = pane;
+    }
+
+    fn wheel(&mut self, pane: FocusPane, down: bool) {
+        let state = &mut self.app.state;
+        match pane {
+            FocusPane::Tree => state.move_tree(if down { 1 } else { -1 }),
+            FocusPane::Inspector => {
+                if down {
+                    state.inspector_scroll = state.inspector_scroll.saturating_add(1);
+                } else {
+                    state.inspector_scroll = state.inspector_scroll.saturating_sub(1);
+                }
+            }
+            FocusPane::Preview => {
+                if down {
+                    state.preview_scroll = state.preview_scroll.saturating_add(1);
+                } else {
+                    state.preview_scroll = state.preview_scroll.saturating_sub(1);
+                }
+            }
+            FocusPane::Log => {
+                state.focus = FocusPane::Log;
+                let vis = state.log_visible_rows();
+                let max = (state.log_lines.len() as u16).saturating_sub(vis);
+                if down {
+                    state.log_scroll = state.log_scroll.saturating_add(1).min(max);
+                } else {
+                    state.log_scroll = state.log_scroll.saturating_sub(1);
+                }
+                state.log_follow = state.log_scroll >= max;
+            }
+        }
     }
 
     #[cfg(test)]
@@ -358,41 +578,19 @@ impl Shell {
     }
 
     fn on_key_down(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
-        self.handle_key(&chord(event));
+        let key = chord(event);
+        if key == "ctrl-v" {
+            if let Some(item) = cx.read_from_clipboard()
+                && let Some(text) = item.text()
+            {
+                self.paste(&text);
+            }
+        } else {
+            self.handle_key(&key);
+        }
         if self.quit && self.quit_runtime {
             cx.quit();
         }
-    }
-
-    fn body_key(&mut self, key: &str) {
-        let vim = self.gui.vim_keys;
-        match key {
-            "up" => self.app.state.move_tree(-1),
-            "down" => self.app.state.move_tree(1),
-            "k" if vim => self.app.state.move_tree(-1),
-            "j" if vim => self.app.state.move_tree(1),
-            "g" if vim => self.app.state.jump_tree(false),
-            "shift-g" if vim => self.app.state.jump_tree(true),
-            "enter" => self.app.state.expand_or_select(),
-            "h" | "left" if vim || key == "left" => self.app.state.toggle_expand(),
-            "l" | "right" if vim || key == "right" => self.app.state.toggle_expand(),
-            _ => {}
-        }
-    }
-
-    fn open_doctor(&mut self) {
-        if self.doctor_open {
-            self.doctor_open = false;
-            return;
-        }
-        // Same entry as the terminal. skip_detect (tests, demo fixtures) returns
-        // before any job is spawned. The sheet then paints the local tool report.
-        dd_pantheon::workflows::start_doctor_jobs(&mut self.app.state);
-        if self.app.state.skip_detect {
-            self.app.state.tools = dd_pantheon::tools::detect_which();
-            self.app.state.tools_enabled = self.app.state.tools.terminus_ok();
-        }
-        self.doctor_open = true;
     }
 
     fn open_settings(&mut self) {
@@ -922,15 +1120,37 @@ impl Render for Shell {
         let footer = self.footer_line();
         let tree = self.tree_lines();
         let selected = self.app.state.tree_state.selected();
-        let busy = self.app.state.job_running.then(|| busy_label(self.booted_at.elapsed()));
-        let doctor = self.doctor_open.then(|| {
-            dd_pantheon::doctor::render(
-                &self.app.state.tools,
-                &self.app.state.auth,
-                &self.app.state.catalog,
-                &self.app.state.doctor_warnings,
-            )
-        });
+        if let Some(index) = selected {
+            self.tree_scroll.scroll_to_item(index);
+        }
+        let busy = self
+            .app
+            .state
+            .job_running
+            .then(|| busy_label(self.booted_at.elapsed()));
+        let status = present::header_status(&self.app.state);
+        let demo = self.app.state.demo;
+        let focus = self.app.state.focus;
+        let tree_title = present::tree_title(&self.app.state);
+        let chips = present::tag_chips(&self.app.state);
+        let inspector = self.window_inspector();
+        let preview = self.window_preview();
+        let log_lines = present::log_lines(&self.app.state);
+        let modal = present::modal_lines(&self.app.state).map(|lines| self.page_modal(lines));
+        let toast = self
+            .app
+            .state
+            .toast
+            .as_ref()
+            .map(|toast| toast.message.clone());
+        let actions: Vec<(String, String)> = self
+            .app
+            .state
+            .actions
+            .iter()
+            .map(|action| (action.id.to_string(), action.label.to_string()))
+            .collect();
+        let period = self.app.state.metrics_period;
         let settings = self.appearance.is_some();
         let nav = self.settings_nav;
         let query = self.settings_query.clone();
@@ -965,12 +1185,30 @@ impl Render for Shell {
             .child(header_bar(
                 band,
                 busy,
+                status,
+                demo,
                 paint.raised,
                 paint.text,
                 paint.border,
                 paint.accent,
             ))
-            .child(site_tree(cx, tree, selected, band, &paint, &tree_scroll))
+            .child(cockpit_body(
+                cx,
+                tree_title,
+                tree,
+                selected,
+                inspector,
+                chips,
+                preview,
+                log_lines,
+                actions,
+                period,
+                focus,
+                band,
+                &paint,
+                &tree_scroll,
+            ))
+            .children(toast.map(|message| toast_bar(message, band, paint.accent, paint.base)))
             .child(footer_bar(
                 &footer,
                 band,
@@ -978,9 +1216,15 @@ impl Render for Shell {
                 paint.secondary,
                 paint.border,
             ))
-            .children(doctor.map(|text| {
-                doctor_panel(
-                    cx, text, band, paint.raised, paint.text, paint.border, paint.accent,
+            .children(modal.map(|lines| {
+                modal_layer(
+                    cx,
+                    lines,
+                    band,
+                    paint.raised,
+                    paint.text,
+                    paint.border,
+                    paint.accent,
                 )
             }))
             .when(settings, |root| {
@@ -1008,29 +1252,6 @@ impl Render for Shell {
                     scroll,
                 ))
             })
-    }
-}
-
-fn tree_line(state: &AppState, row: &TreeRow, selected: bool) -> String {
-    let mark = if selected { ">" } else { " " };
-    if let Some(env) = &row.env {
-        format!("{mark} {} {env}", row.site)
-    } else {
-        let tags = state
-            .site(&row.site)
-            .map(|site| {
-                site.tags
-                    .iter()
-                    .map(|tag| tag.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            })
-            .unwrap_or_default();
-        if tags.is_empty() {
-            format!("{mark} {}", row.site)
-        } else {
-            format!("{mark} {} {tags}", row.site)
-        }
     }
 }
 
@@ -1121,7 +1342,9 @@ impl Shell {
         let Some(appearance) = &self.appearance else {
             return Vec::new();
         };
-        if appearance.editor.is_some() || self.settings_nav != 0 || !self.settings_query.trim().is_empty()
+        if appearance.editor.is_some()
+            || self.settings_nav != 0
+            || !self.settings_query.trim().is_empty()
         {
             return Vec::new();
         }
@@ -1209,6 +1432,8 @@ fn is_text(key: &str) -> bool {
 fn header_bar(
     band: f32,
     busy: Option<String>,
+    status: String,
+    demo: bool,
     raised: Hsla,
     text: Hsla,
     border: Hsla,
@@ -1227,6 +1452,8 @@ fn header_bar(
         .border_color(border)
         .font_weight(FontWeight::BOLD)
         .child("dd_pantheon")
+        .when(demo, |bar| bar.child("DEMO"))
+        .when(!status.is_empty(), |bar| bar.child(status))
         .child(div().flex_1())
         .children(busy.map(|label| div().text_color(accent).child(label)))
 }
@@ -1289,11 +1516,9 @@ fn site_tree(
                 .cursor_pointer()
                 .when(on, |row| row.bg(paint.selected).text_color(paint.accent))
                 .on_click(cx.listener(move |shell, _: &ClickEvent, _, cx| {
-                    shell.app.state.move_tree(0);
-                    if let Some(cur) = shell.app.state.tree_state.selected() {
-                        let delta = index as isize - cur as isize;
-                        shell.app.state.move_tree(delta);
-                    }
+                    shell.focus_pane(FocusPane::Tree);
+                    shell.app.state.tree_state.select(Some(index));
+                    shell.app.state.apply_row_selection(index);
                     cx.stop_propagation();
                     cx.notify();
                 }))
@@ -1303,51 +1528,451 @@ fn site_tree(
     list
 }
 
-fn doctor_panel(
+fn cockpit_body(
     cx: &mut Context<Shell>,
-    text: String,
+    tree_title: String,
+    tree: Vec<String>,
+    selected: Option<usize>,
+    inspector: Vec<String>,
+    chips: Vec<present::TagChip>,
+    preview: Vec<String>,
+    log_lines: Vec<String>,
+    actions: Vec<(String, String)>,
+    period: dd_pantheon::models::MetricsPeriod,
+    focus: FocusPane,
+    band: f32,
+    paint: &Paint,
+    tree_scroll: &ScrollHandle,
+) -> gpui::Div {
+    div()
+        .flex_1()
+        .min_h(px(0.0))
+        .flex()
+        .flex_row()
+        .overflow_hidden()
+        .child(
+            div()
+                .w(relative(0.34))
+                .h_full()
+                .flex()
+                .flex_col()
+                .border_r_1()
+                .border_color(paint.border)
+                .child(pane_title(
+                    &tree_title,
+                    focus == FocusPane::Tree,
+                    band,
+                    paint,
+                ))
+                .child(site_tree(cx, tree, selected, band, paint, tree_scroll)),
+        )
+        .child(
+            div()
+                .flex_1()
+                .h_full()
+                .min_w(px(0.0))
+                .flex()
+                .flex_col()
+                .overflow_hidden()
+                .child(text_pane(
+                    cx,
+                    "inspector",
+                    "Inspector",
+                    focus == FocusPane::Inspector,
+                    inspector,
+                    chips,
+                    FocusPane::Inspector,
+                    band,
+                    paint,
+                ))
+                .child(action_row(cx, actions, period, band, paint))
+                .child(text_pane(
+                    cx,
+                    "preview",
+                    "Command preview",
+                    focus == FocusPane::Preview,
+                    preview,
+                    Vec::new(),
+                    FocusPane::Preview,
+                    band,
+                    paint,
+                ))
+                .child(preview_buttons(cx, band, paint))
+                .child(text_pane(
+                    cx,
+                    "log",
+                    "Log",
+                    focus == FocusPane::Log,
+                    log_lines,
+                    Vec::new(),
+                    FocusPane::Log,
+                    band,
+                    paint,
+                )),
+        )
+}
+
+fn pane_title(title: &str, focused: bool, band: f32, paint: &Paint) -> gpui::Div {
+    div()
+        .h(px(band * 0.85))
+        .px(px(8.0))
+        .flex()
+        .flex_shrink_0()
+        .items_center()
+        .font_weight(FontWeight::BOLD)
+        .bg(paint.raised)
+        .text_color(if focused {
+            paint.accent
+        } else {
+            paint.secondary
+        })
+        .border_b_1()
+        .border_color(paint.border)
+        .child(title.to_string())
+}
+
+fn text_pane(
+    cx: &mut Context<Shell>,
+    id: &'static str,
+    title: &str,
+    focused: bool,
+    lines: Vec<String>,
+    chips: Vec<present::TagChip>,
+    pane: FocusPane,
+    band: f32,
+    paint: &Paint,
+) -> gpui::Div {
+    let mut body = div()
+        .id(id)
+        .flex_1()
+        .min_h(px(0.0))
+        .overflow_hidden()
+        .flex()
+        .flex_col()
+        .bg(paint.body)
+        .text_color(paint.text)
+        .on_click(cx.listener(move |shell, _: &ClickEvent, _, cx| {
+            let expand = pane == FocusPane::Log && shell.app.state.focus == FocusPane::Log;
+            shell.focus_pane(pane);
+            if expand {
+                shell.forward("enter");
+            }
+            cx.stop_propagation();
+            cx.notify();
+        }))
+        .on_scroll(cx.listener(move |shell, event: &gpui::ScrollEvent, _, cx| {
+            let down = scroll_down(&event.delta);
+            shell.wheel(pane, down);
+            cx.stop_propagation();
+            cx.notify();
+        }));
+    if !chips.is_empty() {
+        body = body.child(tag_row(cx, chips, band, paint));
+    }
+    if lines.is_empty() {
+        body = body.child(
+            div()
+                .px(px(8.0))
+                .text_color(paint.secondary)
+                .child("(empty)"),
+        );
+    }
+    for (index, line) in lines.into_iter().enumerate() {
+        body = body.child(div().id((id, index)).px(px(8.0)).py(px(1.0)).child(line));
+    }
+    div()
+        .flex_1()
+        .min_h(px(0.0))
+        .flex()
+        .flex_col()
+        .overflow_hidden()
+        .border_b_1()
+        .border_color(paint.border)
+        .child(pane_title(title, focused, band, paint))
+        .child(body)
+}
+
+fn tag_row(
+    cx: &mut Context<Shell>,
+    chips: Vec<present::TagChip>,
+    band: f32,
+    paint: &Paint,
+) -> gpui::Div {
+    let mut row = div()
+        .h(px(band))
+        .flex_shrink_0()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(6.0))
+        .px(px(8.0))
+        .bg(paint.body);
+    for (index, chip) in chips.into_iter().enumerate() {
+        let name = chip.name.clone();
+        row = row.child(
+            div()
+                .id(("tag", index))
+                .px(px(6.0))
+                .cursor_pointer()
+                .border_1()
+                .border_color(paint.border)
+                .text_color(if chip.close { paint.accent } else { paint.text })
+                .on_click(cx.listener(move |shell, _: &ClickEvent, _, cx| {
+                    shell.click_tag(&name, false);
+                    cx.stop_propagation();
+                    cx.notify();
+                }))
+                .child(format!("[{}]", chip.name)),
+        );
+        if chip.close {
+            let name = chip.name;
+            row = row.child(
+                div()
+                    .id(("tag-x", index))
+                    .px(px(4.0))
+                    .cursor_pointer()
+                    .text_color(paint.accent)
+                    .on_click(cx.listener(move |shell, _: &ClickEvent, _, cx| {
+                        shell.click_tag(&name, true);
+                        cx.stop_propagation();
+                        cx.notify();
+                    }))
+                    .child("×"),
+            );
+        }
+    }
+    row
+}
+
+fn action_row(
+    cx: &mut Context<Shell>,
+    actions: Vec<(String, String)>,
+    period: dd_pantheon::models::MetricsPeriod,
+    band: f32,
+    paint: &Paint,
+) -> gpui::Div {
+    let mut row = div()
+        .h(px(band))
+        .flex_shrink_0()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(6.0))
+        .px(px(8.0))
+        .bg(paint.raised)
+        .border_b_1()
+        .border_color(paint.border)
+        .overflow_hidden();
+    for (index, (key, label)) in [
+        (dd_pantheon::models::MetricsPeriod::Day, "d"),
+        (dd_pantheon::models::MetricsPeriod::Week, "w"),
+        (dd_pantheon::models::MetricsPeriod::Month, "M"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let on = period == key;
+        row = row.child(
+            div()
+                .id(("period", index))
+                .px(px(6.0))
+                .cursor_pointer()
+                .text_color(if on { paint.accent } else { paint.secondary })
+                .on_click(cx.listener(move |shell, _: &ClickEvent, _, cx| {
+                    dd_pantheon::workflows::metrics::set_period(&mut shell.app.state, key);
+                    cx.stop_propagation();
+                    cx.notify();
+                }))
+                .child(if on {
+                    format!("[{label}]")
+                } else {
+                    label.to_string()
+                }),
+        );
+    }
+    for (index, (id, label)) in actions.into_iter().enumerate() {
+        row = row.child(
+            div()
+                .id(("action", index))
+                .px(px(6.0))
+                .cursor_pointer()
+                .text_color(paint.secondary)
+                .on_click(cx.listener(move |shell, _: &ClickEvent, _, cx| {
+                    shell.activate_action(&id);
+                    cx.stop_propagation();
+                    cx.notify();
+                }))
+                .child(label),
+        );
+    }
+    row
+}
+
+fn preview_buttons(cx: &mut Context<Shell>, band: f32, paint: &Paint) -> gpui::Div {
+    div()
+        .h(px(band))
+        .flex_shrink_0()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(8.0))
+        .px(px(8.0))
+        .bg(paint.raised)
+        .border_b_1()
+        .border_color(paint.border)
+        .child(preview_button(
+            cx,
+            "preview-process",
+            "process",
+            "PROCESS COMMAND",
+            paint.accent,
+        ))
+        .child(preview_button(
+            cx,
+            "preview-copy",
+            "copy",
+            "COPY TO CLIPBOARD",
+            paint.secondary,
+        ))
+        .child(preview_button(
+            cx,
+            "preview-cancel",
+            "cancel",
+            "CANCEL",
+            paint.secondary,
+        ))
+}
+
+fn preview_button(
+    cx: &mut Context<Shell>,
+    element_id: &'static str,
+    action: &'static str,
+    label: &'static str,
+    color: Hsla,
+) -> gpui::Stateful<gpui::Div> {
+    div()
+        .id(element_id)
+        .px(px(8.0))
+        .cursor_pointer()
+        .border_1()
+        .border_color(color)
+        .text_color(color)
+        .on_click(cx.listener(move |shell, _: &ClickEvent, _, cx| {
+            shell.preview_click(action);
+            cx.stop_propagation();
+            cx.notify();
+        }))
+        .child(label)
+}
+
+fn toast_bar(message: String, band: f32, accent: Hsla, base: Hsla) -> gpui::Div {
+    div()
+        .h(px(band * 0.85))
+        .flex()
+        .flex_shrink_0()
+        .items_center()
+        .px(px(8.0))
+        .bg(base)
+        .text_color(accent)
+        .child(message)
+}
+
+fn scroll_down(delta: &gpui::ScrollDelta) -> bool {
+    match delta {
+        gpui::ScrollDelta::Pixels(point) => point.y > px(0.0),
+        gpui::ScrollDelta::Lines(point) => point.y > 0.0,
+    }
+}
+
+fn modal_layer(
+    cx: &mut Context<Shell>,
+    lines: Vec<String>,
     band: f32,
     raised: Hsla,
     color: Hsla,
     border: Hsla,
     accent: Hsla,
 ) -> gpui::Stateful<gpui::Div> {
+    let title = lines.first().cloned().unwrap_or_else(|| "Dialog".into());
     div()
-        .id("doctor-panel")
-        .occlude()
+        .id("modal-scrim")
         .absolute()
-        .top(px(band))
-        .left(px(48.0))
-        .right(px(48.0))
-        .bottom(px(band + 24.0))
+        .inset_0()
+        .occlude()
         .flex()
-        .flex_col()
-        .overflow_hidden()
-        .bg(raised)
-        .text_color(color)
-        .border_1()
-        .border_color(border)
-        .on_click(cx.listener(|_, _: &ClickEvent, _, cx| {
+        .items_center()
+        .justify_center()
+        .bg(gpui::hsla(0.0, 0.0, 0.0, 0.35))
+        .on_click(cx.listener(|shell, _: &ClickEvent, _, cx| {
+            shell.dismiss_outside();
             cx.stop_propagation();
+            cx.notify();
         }))
         .child(
             div()
-                .h(px(28.0))
-                .px(px(8.0))
+                .id("cockpit-modal")
+                .w(relative(0.62))
+                .max_h(relative(0.8))
                 .flex()
-                .items_center()
-                .font_weight(FontWeight::BOLD)
-                .text_color(accent)
-                .child("F3 Doctor"),
-        )
-        .child(
-            div()
-                .id("doctor-body")
-                .flex_1()
-                .min_h(px(0.0))
-                .overflow_y_scroll()
-                .p(px(8.0))
-                .child(text),
+                .flex_col()
+                .overflow_hidden()
+                .bg(raised)
+                .text_color(color)
+                .border_1()
+                .border_color(border)
+                .on_click(cx.listener(|_, _: &ClickEvent, _, cx| {
+                    cx.stop_propagation();
+                }))
+                .child(
+                    div()
+                        .h(px(band))
+                        .px(px(8.0))
+                        .flex()
+                        .items_center()
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(accent)
+                        .child(title),
+                )
+                .child({
+                    let mut body = div()
+                        .id("modal-body")
+                        .flex_1()
+                        .min_h(px(0.0))
+                        .overflow_hidden()
+                        .p(px(8.0))
+                        .flex()
+                        .flex_col()
+                        .gap(px(2.0))
+                        .on_scroll(cx.listener(|shell, event: &gpui::ScrollEvent, _, cx| {
+                            let down = scroll_down(&event.delta);
+                            match &mut shell.app.state.modal {
+                                Some(Modal::Doctor { scroll }) => {
+                                    if down {
+                                        *scroll = scroll.saturating_add(1);
+                                    } else {
+                                        *scroll = scroll.saturating_sub(1);
+                                    }
+                                }
+                                Some(Modal::LogExpand) => shell.wheel(FocusPane::Log, down),
+                                _ => {}
+                            }
+                            cx.stop_propagation();
+                            cx.notify();
+                        }));
+                    for (index, line) in lines.into_iter().enumerate() {
+                        body = body.child(
+                            div()
+                                .id(("modal-line", index))
+                                .on_click(cx.listener(move |shell, _: &ClickEvent, _, cx| {
+                                    shell.click_modal_line(index);
+                                    cx.stop_propagation();
+                                    cx.notify();
+                                }))
+                                .child(line),
+                        );
+                    }
+                    body
+                }),
         )
 }
 
@@ -1442,22 +2067,8 @@ fn settings_panel(
                                 .child(hint),
                         )
                         .child(settings_body(
-                            cx,
-                            nav,
-                            theme_rows,
-                            color_rows,
-                            help,
-                            results,
-                            density,
-                            vim_on,
-                            window_row,
-                            query,
-                            text,
-                            secondary,
-                            border,
-                            selected,
-                            accent,
-                            raised,
+                            cx, nav, theme_rows, color_rows, help, results, density, vim_on,
+                            window_row, query, text, secondary, border, selected, accent, raised,
                             scroll,
                         )),
                 ),
@@ -1526,7 +2137,11 @@ fn settings_nav(
                 .flex()
                 .items_center()
                 .cursor_pointer()
-                .text_color(if query_on { colors.text } else { colors.secondary })
+                .text_color(if query_on {
+                    colors.text
+                } else {
+                    colors.secondary
+                })
                 .on_click(cx.listener(|shell, _: &ClickEvent, _, cx| {
                     shell.settings_query_on = true;
                     cx.stop_propagation();
@@ -1639,16 +2254,14 @@ fn settings_body(
         body = body.child(div().h(px(12.0)));
         body = body.child(outlined(
             "Vim keys",
-            vec![
-                (
-                    if vim_on {
-                        "Vim keys on".to_string()
-                    } else {
-                        "Vim keys off".to_string()
-                    },
-                    window_row == 1,
-                ),
-            ],
+            vec![(
+                if vim_on {
+                    "Vim keys on".to_string()
+                } else {
+                    "Vim keys off".to_string()
+                },
+                window_row == 1,
+            )],
             1,
             border,
             raised,

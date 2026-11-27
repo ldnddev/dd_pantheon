@@ -11,6 +11,7 @@ mod shell;
 mod tree;
 
 pub use shell::footer_keys;
+pub use shell::footer_text;
 
 use crate::state::AppState;
 use crate::toast::ToastLevel;

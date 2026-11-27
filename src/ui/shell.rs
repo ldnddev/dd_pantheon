@@ -70,8 +70,13 @@ fn header_status(state: &AppState) -> String {
     }
 }
 
+/// Pane-contextual footer. The window calls this with a wide width so every hint fits.
+pub fn footer_text(state: &AppState, width: u16) -> String {
+    footer_line(width, state)
+}
+
 pub fn draw_footer(f: &mut Frame, state: &AppState, area: Rect) {
-    let keys = footer_line(area.width, state);
+    let keys = footer_text(state, area.width);
     let bar = Paragraph::new(Line::from(keys)).style(state.theme.app_shell);
     f.render_widget(bar, area);
     if state.job_running {
