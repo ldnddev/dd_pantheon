@@ -147,9 +147,145 @@ fn doctor_uses_the_local_report_and_does_not_spawn(cx: &mut TestAppContext) {
         assert!(shell.app.state.jobs.is_empty());
         shell.handle_key("f3");
         let text = shell.visible_text();
+        assert!(text.contains("modal:"), "{text}");
         assert!(text.contains("Doctor"), "{text}");
+        assert!(text.contains("Tools"), "{text}");
+        assert!(text.contains("whoami"), "{text}");
         assert!(shell.app.state.jobs.is_empty());
         assert!(shell.app.state.skip_detect);
+        shell.handle_key("f3");
+        assert!(
+            !shell.visible_text().contains("modal:"),
+            "{}",
+            shell.visible_text()
+        );
+    });
+}
+
+#[gpui::test]
+fn phase_panes_filter_and_palette_do_not_spawn(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let shell = mount(cx, dir.path());
+    shell.update(cx, |shell, _| {
+        shell.handle_key("tab");
+        assert!(shell.visible_text().contains("focus:inspector"));
+        shell.handle_key("shift-tab");
+        assert!(shell.visible_text().contains("focus:tree"));
+
+        shell.handle_key("/");
+        shell.handle_key("f");
+        shell.handle_key("r");
+        shell.handle_key("o");
+        shell.handle_key("z");
+        let filtered = shell.visible_text();
+        assert!(filtered.contains("Filter /froz"), "{filtered}");
+        assert!(filtered.contains("frozen-lab"), "{filtered}");
+        shell.handle_key("enter");
+        assert!(
+            shell.selected_label().contains("frozen-lab"),
+            "{}",
+            shell.selected_label()
+        );
+        assert!(shell.app.state.jobs.is_empty());
+
+        shell.handle_key(":");
+        let palette = shell.visible_text();
+        assert!(palette.contains("Palette"), "{palette}");
+        for ch in ["e", "n", "v", ":", "w", "i", "p", "e"] {
+            shell.handle_key(ch);
+        }
+        let narrowed = shell.visible_text();
+        assert!(narrowed.contains("env:wipe"), "{narrowed}");
+        shell.handle_key("enter");
+        let form = shell.visible_text();
+        assert!(form.contains("env:wipe"), "{form}");
+        assert!(form.contains("site_env frozen-lab.dev"), "{form}");
+        shell.handle_key("enter");
+        let staged = shell.visible_text();
+        assert!(
+            staged.contains("env:wipe") || staged.contains("wipe"),
+            "{staged}"
+        );
+        assert!(!staged.contains("modal:"), "{staged}");
+        assert!(shell.app.state.jobs.is_empty());
+    });
+}
+
+#[gpui::test]
+fn phase_gates_login_and_quit_confirm(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let shell = mount(cx, dir.path());
+    shell.update(cx, |shell, _| {
+        shell.handle_key("ctrl-l");
+        let login = shell.visible_text();
+        assert!(login.contains("toast:terminus not on PATH"), "{login}");
+        assert!(!login.contains("modal:"), "{login}");
+        assert!(shell.app.state.jobs.is_empty());
+
+        shell.handle_key("tab");
+        shell.handle_key("tab");
+        assert!(shell.visible_text().contains("focus:preview"));
+        shell.handle_key("enter");
+        let ran = shell.visible_text();
+        assert!(ran.contains("toast:demo: no spawn"), "{ran}");
+        assert!(shell.app.state.jobs.is_empty());
+
+        shell.app.state.modal = Some(dd_pantheon::state::Modal::LiveGate {
+            plan: dd_pantheon::plan::CommandPlan {
+                tool: dd_pantheon::plan::ToolKind::Terminus,
+                binary: std::path::PathBuf::from("terminus"),
+                argv: vec!["env:wipe".into(), "acme-wp.live".into()],
+                cwd: None,
+                why: "wipe live".into(),
+                safety: dd_pantheon::plan::SafetyTier::LiveGate,
+                target: dd_pantheon::plan::PlanTarget::Env {
+                    site: "acme-wp".into(),
+                    env: "live".into(),
+                },
+                dry_run: true,
+                timeout: None,
+                expects_json: false,
+                extra_env: vec![],
+                redact: vec![],
+                confirm_with_yes: true,
+            },
+            expected: "live".into(),
+            typed: String::new(),
+        });
+        shell.handle_key("f1");
+        let gate = shell.visible_text();
+        assert!(gate.contains("LiveGate"), "{gate}");
+        assert!(!gate.contains("settings-panel"), "{gate}");
+        assert!(
+            gate.contains("Enter does nothing until the word matches"),
+            "{gate}"
+        );
+        assert!(gate.contains("type live"), "{gate}");
+        assert!(!gate.contains("Enter: Run"), "{gate}");
+        shell.handle_key("x");
+        let mismatch = shell.visible_text();
+        assert!(mismatch.contains("That does not match"), "{mismatch}");
+        shell.handle_key("backspace");
+        for ch in ["l", "i", "v", "e"] {
+            shell.handle_key(ch);
+        }
+        let matched = shell.visible_text();
+        assert!(matched.contains("Enter runs this command"), "{matched}");
+        assert!(matched.contains("Enter: Run"), "{matched}");
+        shell.handle_key("enter");
+        assert!(shell.app.state.jobs.is_empty());
+        assert!(
+            shell.visible_text().contains("toast:dry_run: no spawn")
+                || !shell.visible_text().contains("modal:")
+        );
+
+        shell.app.state.job_running = true;
+        shell.handle_key("ctrl-q");
+        assert!(!shell.quit_requested());
+        assert!(shell.visible_text().contains("A job is still running"));
+        shell.handle_key("escape");
+        assert!(!shell.quit_requested());
+        shell.app.state.job_running = false;
     });
 }
 

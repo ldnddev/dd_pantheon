@@ -34,6 +34,36 @@ pub fn rows() -> &'static [Shortcut] {
             tui: "Esc",
         },
         Shortcut {
+            section: "Global",
+            action: "Palette",
+            gui: "Ctrl+K",
+            tui: "Ctrl+K",
+        },
+        Shortcut {
+            section: "Global",
+            action: "Filter",
+            gui: "/",
+            tui: "/",
+        },
+        Shortcut {
+            section: "Global",
+            action: "Login",
+            gui: "Ctrl+L",
+            tui: "Ctrl+L",
+        },
+        Shortcut {
+            section: "Global",
+            action: "Cancel job",
+            gui: "Ctrl+C",
+            tui: "Ctrl+C",
+        },
+        Shortcut {
+            section: "Global",
+            action: "Help",
+            gui: "?",
+            tui: "?",
+        },
+        Shortcut {
             section: "Tree",
             action: "Move",
             gui: "Up/Down",
