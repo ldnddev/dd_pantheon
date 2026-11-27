@@ -13,7 +13,7 @@ dd_pantheon
 dd_pantheon --root ~/sites/acme-wp
 ```
 
-Pin a version with `VERSION=v0.3.9`. With a terminal to answer, the script
+Pin a version with `VERSION=v0.3.10`. With a terminal to answer, the script
 asks for the terminal app, the desktop window, or both. With no terminal it
 installs the terminal app. `--tui`, `--gui`, and `--both` skip the question
 (pass only one). `INSTALL_GUI=1` is the same as `--both`.
