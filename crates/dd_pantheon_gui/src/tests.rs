@@ -290,6 +290,82 @@ fn phase_gates_login_and_quit_confirm(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn phase_workflows_stage_without_spawning(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let shell = mount(cx, dir.path());
+    shell.update(cx, |shell, _| {
+        shell.handle_key("w");
+        assert_eq!(
+            shell.app.state.metrics_period,
+            dd_pantheon::models::MetricsPeriod::Week
+        );
+        shell.handle_key("d");
+        assert_eq!(
+            shell.app.state.metrics_period,
+            dd_pantheon::models::MetricsPeriod::Day
+        );
+        shell.handle_key("shift-m");
+        assert_eq!(
+            shell.app.state.metrics_period,
+            dd_pantheon::models::MetricsPeriod::Month
+        );
+        assert!(
+            shell.visible_text().contains("[M]"),
+            "{}",
+            shell.visible_text()
+        );
+
+        shell.handle_key("m");
+        let cms = shell.visible_text();
+        assert!(cms.contains("CMS"), "{cms}");
+        assert!(cms.contains("cms wp"), "{cms}");
+        assert!(cms.contains("target local"), "{cms}");
+        shell.handle_key("escape");
+
+        shell.handle_key("e");
+        let deploy = shell.visible_text();
+        assert!(deploy.contains("Deploy to acme-wp.test"), "{deploy}");
+        assert!(deploy.contains("--sync-content"), "{deploy}");
+        shell.handle_key("escape");
+
+        shell.handle_key("n");
+        let create = shell.visible_text();
+        assert!(create.contains("Create site"), "{create}");
+        assert!(create.contains("org ldnddev"), "{create}");
+        assert!(create.contains("upstream WordPress"), "{create}");
+        shell.handle_key("escape");
+
+        shell.handle_key("shift-t");
+        let tags = shell.visible_text();
+        assert!(tags.contains("Tag filter"), "{tags}");
+        assert!(tags.contains("prod"), "{tags}");
+        assert!(tags.contains("client-acme"), "{tags}");
+        shell.handle_key("escape");
+
+        shell.handle_key("a");
+        shell.handle_key("q");
+        shell.handle_key("a");
+        shell.handle_key("enter");
+        let added = shell.visible_text();
+        assert!(added.contains("toast:demo: no spawn"), "{added}");
+        assert!(shell.app.state.jobs.is_empty());
+
+        shell.handle_key("b");
+        let backup = shell.visible_text();
+        assert!(backup.contains("backup:create"), "{backup}");
+        assert!(backup.contains("toast:demo: no spawn"), "{backup}");
+        assert!(shell.app.state.jobs.is_empty());
+
+        shell.preview_click("cancel");
+        assert!(
+            shell.visible_text().contains("no plan staged")
+                || shell.visible_text().contains("plan cancelled")
+        );
+        assert!(shell.app.state.jobs.is_empty());
+    });
+}
+
+#[gpui::test]
 fn quit_is_ctrl_q_and_the_tree_moves(cx: &mut TestAppContext) {
     let dir = tempfile::tempdir().unwrap();
     let shell = mount(cx, dir.path());
