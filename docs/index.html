@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>dd_pantheon tutorial — setup and daily use</title>
-  <meta name="description" content="Install dd_pantheon, run the --demo cockpit, log in with a machine token, and run Terminus and Lando from a preview-first TUI.">
+  <meta name="description" content="Install the dd_pantheon terminal or desktop window, run the --demo cockpit, log in with a machine token, and run Terminus and Lando from a preview-first cockpit.">
   <link rel="canonical" href="https://ldnddev.github.io/dd_pantheon/">
   <style>
     :root {
@@ -141,8 +141,9 @@
     <p style="color:var(--label);margin:0 0 0.35rem;font-size:0.85rem;letter-spacing:0.06em;text-transform:uppercase;">ldnddev · dd_pantheon</p>
     <h1>Setup and daily use</h1>
     <p class="lede">
-      dd_pantheon is a terminal cockpit for Pantheon WordPress and Drupal sites.
-      It never calls the Pantheon HTTP API. Every action is a
+      dd_pantheon is a cockpit for Pantheon WordPress and Drupal sites.
+      The terminal app and the desktop window share one set of sites, plans,
+      and jobs. It never calls the Pantheon HTTP API. Every action is a
       <code>terminus</code>, <code>lando</code>, or <code>git</code> command
       you can see before it runs.
     </p>
@@ -177,14 +178,42 @@
         <li><code>git</code> for git-mode deploys</li>
       </ul>
       <p>
-        Packages exist for Linux and macOS on x86_64 and arm64 (aarch64). The
-        binary lands at <code>~/.local/bin/dd_pantheon</code> (override with
-        <code>PREFIX</code> or <code>BINDIR</code>). If no theme file exists yet,
-        it also installs <code>dd_pantheon_theme.yml</code> next to the other
-        ldnddev themes — not inside the app config dir.
+        With a terminal to answer, the script asks for the terminal app, the
+        desktop window, or both. With no terminal it installs the terminal app.
+        Pin a release with <code>VERSION=v0.3.10</code>.
+        <code>--tui</code>, <code>--gui</code>, and <code>--both</code> skip the
+        question (pass only one). <code>INSTALL_GUI=1</code> is the same as
+        <code>--both</code>.
+      </p>
+      <p>
+        Packages exist for Linux and macOS on x86_64 and arm64 (aarch64).
+        Binaries land in <code>~/.local/bin</code> (override with
+        <code>PREFIX</code> or <code>BINDIR</code>). The published release
+        tarball ships the terminal binary only. <code>--gui</code> and
+        <code>--both</code> with <code>--from-release</code> fail and point at
+        <code>--from-source</code>.
+      </p>
+      <p>
+        <code>dd_pantheon_theme.yml</code> is copied only when it is missing,
+        and only for the terminal app or both. A window-only install does not
+        write it. It sits next to the other ldnddev themes, not inside the app
+        config dir. The window needs Vulkan (<code>libvulkan1</code> and a
+        driver) and Wayland or X11.
+      </p>
+      <p>
+        On Linux the install writes a launcher for each binary it installs.
+        <code>dd_pantheon.desktop</code> is <code>Terminal=true</code>.
+        <code>dd_pantheon-gui.desktop</code> is <code>Terminal=false</code>,
+        <code>StartupNotify=true</code>, and
+        <code>StartupWMClass=dev.ldnddev.dd_pantheon</code>.
+        <code>$XDG_DATA_HOME/applications</code> wins when that variable is set.
+        Otherwise a user install uses <code>~/.local/share/applications</code>,
+        and a prefix outside your home directory uses
+        <code>$PREFIX/share/applications</code>. macOS skips the launcher.
       </p>
 <pre><code>curl -fsSL https://raw.githubusercontent.com/ldnddev/dd_pantheon/main/install.sh | bash
 dd_pantheon --demo
+dd_pantheon-gui --demo
 dd_pantheon
 dd_pantheon --root /path/to/site
 curl -fsSL https://raw.githubusercontent.com/ldnddev/dd_pantheon/main/install.sh | bash -s -- uninstall</code></pre>
@@ -192,21 +221,32 @@ curl -fsSL https://raw.githubusercontent.com/ldnddev/dd_pantheon/main/install.sh
         From a clone, <code>./install.sh</code> builds with cargo when it is on
         <code>PATH</code>. Pass <code>--from-release</code> to force the GitHub
         package, or <code>--from-source</code> to force a cargo build (Rust
-        1.85+, edition 2024).
+        1.85+, edition 2024). The terminal build is the root package. The window
+        build is <code>cargo build --release -p dd_pantheon_gui</code>.
       </p>
 <pre><code>./install.sh
+./install.sh --tui
+./install.sh --gui
+./install.sh --both
 ./install.sh --from-release
+./install.sh --from-source
 ./install.sh uninstall</code></pre>
       <p>
-        Uninstall removes the binary and the default theme file. It does
-        <em>not</em> delete <code>~/.config/ldnddev/dd_pantheon/</code>
-        (history, sites overlay). If <code>~/.local/bin</code> is missing from
-        <code>PATH</code>, the script prints the export line to add.
+        Uninstall asks the same question. The default is both, and with no
+        terminal it removes both. It removes only the chosen binary and its
+        <code>.desktop</code> file. It leaves
+        <code>dd_pantheon_theme.yml</code> and
+        <code>~/.config/ldnddev/dd_pantheon/</code> alone (history, sites
+        overlay, window prefs). Pass the same <code>PREFIX</code>,
+        <code>BINDIR</code>, and <code>XDG_DATA_HOME</code> you used to install.
+        If <code>~/.local/bin</code> is missing from <code>PATH</code>, the
+        script prints the export line to add.
       </p>
       <p>From a clone without installing (dev loop):</p>
 <pre><code>cargo run -- --demo
 cargo run
-cargo run -- --root /path/to/site</code></pre>
+cargo run -- --root /path/to/site
+cargo run -p dd_pantheon_gui -- --demo</code></pre>
       <p>
         Missing Terminus is not fatal: the app still starts, the tree is empty,
         and login is disabled. Same idea if Lando or Git is missing — those
@@ -220,7 +260,7 @@ cargo run -- --root /path/to/site</code></pre>
         your user plans. Enter toasts <code>demo: no spawn</code>.
       </p>
       <figure>
-        <img src="images/demo-cockpit.png" width="1264" height="712" alt="dd_pantheon demo cockpit. Header shows DEMO. Site tree on the left with acme-wp.test selected. Inspector shows WordPress tags, a cache gauge at 93 percent, and an actions list. Preview shows terminus backup:create acme-wp.test --element=all --yes. Job log has dummy backup lines.">
+        <img src="images/demo-cockpit.png" width="1264" height="712" alt="dd_pantheon demo cockpit. Header shows DEMO and acme-wp.test. The tree has test selected under acme-wp. Live is locked, and frozen-lab is frozen. Inspector shows WordPress, tags prod and client-acme, a Gold plan, visitors 1.3k, views 4.2k, and cache 93 percent. The preview badge is MUTATING and the command is terminus backup:create acme-wp.test, with Process, Copy, and Cancel. The job log has dummy backup lines. Footer reads F1: Settings, j/k: Nav, Enter: Run, /: Filter, :: Pal, Ctrl+Q: Quit.">
         <figcaption>
           Classic layout in <code>--demo</code>: tree, inspector, always-on preview, job log.
           The <code>DEMO</code> badge uses the warning color on purpose.
@@ -233,13 +273,35 @@ cargo run -- --root /path/to/site</code></pre>
 
       <h2 id="chrome">Chrome and keys</h2>
       <p>
-        Header is three lines. Footer is one line, always starting
-        <kbd>F1:Help</kbd> then <kbd>F2:Theme</kbd> then quit.
-        Quit is <kbd>Ctrl+Q</kbd> even inside a text field. Bare <kbd>q</kbd> does not quit.
+        The header is three lines: the title and <code>DEMO</code> badge, a
+        short quote, and the selected <code>site.env</code> on the right. The
+        footer is one line. On a wide tree it reads <kbd>F1: Settings</kbd>,
+        <kbd>F3: Doctor</kbd>, <kbd>j/k: Nav</kbd>, <kbd>Tab: Pane</kbd>,
+        <kbd>Enter: Run</kbd>, <kbd>/: Filter</kbd>, <kbd>:: Palette</kbd>,
+        <kbd>r: Refresh</kbd>, and <kbd>Ctrl+Q: Quit</kbd>. A narrower frame
+        drops hints until <kbd>F1: Settings</kbd> and <kbd>Ctrl+Q: Quit</kbd>
+        still fit. While a dialog is up the footer is
+        <kbd>F1: Settings</kbd>, <kbd>Esc: Close</kbd>, <kbd>Ctrl+Q: Quit</kbd>.
+        LiveGate hides <kbd>F1</kbd> and <kbd>F2</kbd> until the typed word
+        matches. <kbd>F1</kbd> and <kbd>F2</kbd> both open Settings.
+        <kbd>?</kbd> opens that sheet on Help. <kbd>F3</kbd> stays Doctor.
+        Quit is <kbd>Ctrl+Q</kbd> even inside a text field. Bare
+        <kbd>q</kbd> does not quit.
+      </p>
+      <p>
+        The desktop window boots the same app. <kbd>F1</kbd>, <kbd>F2</kbd>,
+        <kbd>Ctrl+/</kbd>, and <kbd>Ctrl+,</kbd> open its Settings sheet
+        (Themes, Window, Help) instead of the terminal overlay.
+        <kbd>?</kbd> opens that sheet on Help. When vim letters are off,
+        <kbd>h</kbd> <kbd>j</kbd> <kbd>k</kbd> <kbd>l</kbd> <kbd>g</kbd>
+        <kbd>G</kbd> do nothing on the panes; arrow keys still move. Inside a
+        dialog those letters still reach the terminal handler. Density and the
+        vim toggle live in <code>gui.json</code>. A dialog owns the keyboard
+        even if the sheet is open, and <kbd>Ctrl+Q</kbd> always does.
       </p>
       <figure>
-        <img src="images/demo-help.png" width="1264" height="712" alt="F1 Help modal listing global keys: F1 Help, F2 Theme, F3 Doctor, Ctrl+Q quit, colon for palette, Ctrl+L login, and tree keys including backup, deploy, and CMS.">
-        <figcaption><kbd>F1</kbd> is the in-app cheat sheet. This HTML page does not try to replace it.</figcaption>
+        <img src="images/demo-help.png" width="1264" height="712" alt="Settings sheet open on the Help page, with Help selected beside Themes. Footer reads F1: Settings, Esc: Close, Ctrl+Q: Quit.">
+        <figcaption><kbd>?</kbd> opens Settings on Help. <kbd>F1</kbd> and <kbd>F2</kbd> open Settings on Themes.</figcaption>
       </figure>
       <ul class="keys">
         <li><kbd>Tab</kbd> / <kbd>Shift+Tab</kbd> — tree → inspector → preview → log</li>
@@ -250,8 +312,9 @@ cargo run -- --root /path/to/site</code></pre>
 
       <h2 id="login">Login</h2>
       <p>
-        Open the login modal with <kbd>Ctrl+L</kbd>, F3, or the Actions row
-        <em>Login</em>. Paste a Pantheon machine token.
+        Open the login modal with <kbd>Ctrl+L</kbd> or the Actions row
+        <em>Login</em>. <kbd>F3</kbd> is Doctor, not login. Paste a Pantheon
+        machine token.
       </p>
       <div class="callout danger">
         <h3>The token is visible in <code>ps</code></h3>
@@ -305,11 +368,11 @@ cargo run -- --root /path/to/site</code></pre>
         Drupal gets <code>--updatedb</code>.
       </p>
       <figure>
-        <img src="images/demo-deploy.png" width="1264" height="712" alt="Deploy to test modal. Note field reads Deploy from dd_pantheon. Sync-content is checked with a backup-first hint. Updatedb is unchecked. Footer says Tab fields, Enter deploy, Esc cancel.">
+        <img src="images/demo-deploy.png" width="1264" height="712" alt="Deploy to test dialog titled env:deploy. Note field reads Deploy from dd_pantheon. Sync-content is checked with a backup-first hint. Updatedb is unchecked. Inside the dialog: Tab fields, Enter deploy, Esc cancel. Page footer: F1: Settings, Esc: Close, Ctrl+Q: Quit.">
         <figcaption>Test deploy form. Default note is <code>Deploy from dd_pantheon</code>. Unchecking sync-content skips the backup-first prefix.</figcaption>
       </figure>
       <figure>
-        <img src="images/demo-livegate.png" width="1264" height="712" alt="LiveGate dialog. Header line says type live to run. Command is terminus env:deploy acme-wp.live with note Deploy from dd_pantheon, --no-interaction, and --yes. Target acme-wp.live. Why: deploy code to acme-wp.live. Hint: Enter does nothing until the word matches. y is a character, not confirm. Empty input titled type live. Footer: Esc Cancel, type live, Enter runs only when it matches, Ctrl+Q Quit.">
+        <img src="images/demo-livegate.png" width="1264" height="712" alt="LiveGate dialog. It says type live to run. The command is terminus env:deploy acme-wp.live with the note Deploy from dd_pantheon. Target acme-wp.live. Why: deploy code to acme-wp.live. Enter does nothing until the word matches, and y is a character, not confirm. The input is empty and titled type live. Footer: Esc Cancel, type live, Enter runs only when it matches, Ctrl+Q Quit. The header shows acme-wp.live. In the tree, test under acme-wp is still the highlighted row. The inspector shows terminus not on PATH because this frame turns demo off so the gate can open. The sites are still fixtures.">
         <figcaption>
           Live deploy asks you to type <kbd>live</kbd>. A Lando DB push asks for
           <kbd>database</kbd> even if the dest is live — one word, not two.
@@ -323,7 +386,7 @@ cargo run -- --root /path/to/site</code></pre>
         then the command after <code>--</code>.
       </p>
       <figure>
-        <img src="images/demo-cms.png" width="1264" height="712" alt="CMS command modal. Target local, cms wp, empty command field focused. History lists plugin list, core version, and status. Never auto-inserts -y.">
+        <img src="images/demo-cms.png" width="1264" height="712" alt="CMS command dialog. Target is local and cms is wp. The command field shows the placeholder type a CMS command, for example plugin list. Top options list lando wp plugin list and lando wp plugin install akismet --activate. History lists plugin list and core version. The form says it never auto-inserts -y. Footer: F1: Settings, Esc: Close, Ctrl+Q: Quit.">
         <figcaption>
           Demo defaults to local because acme-wp’s fixture Lando app is marked running.
           History lives in config (last 50). Wipe-class CMS (<code>sql-drop</code>,
@@ -338,9 +401,9 @@ cargo run -- --root /path/to/site</code></pre>
         <strong>stages only</strong> — you still press Enter in preview to run.
       </p>
       <figure>
-        <img src="images/demo-palette.png" width="1264" height="712" alt="Command palette filtered to wipe. Query wipe. Highlighted match env:wipe, description Wipe an environment database and files. Second match remote:wp. Footer: type to filter, arrows, Enter form, Esc.">
+        <img src="images/demo-palette.png" width="1264" height="712" alt="Command palette filtered to wipe. Query wipe. One match: terminus env:wipe, description Wipe an environment database and files. Hint inside the dialog: type to filter, arrows, Enter form, Esc. Page footer: F1: Settings, Esc: Close, Ctrl+Q: Quit.">
         <figcaption>
-          Fuzzy subsequence match, no extra crate. Wipe has <strong>no <kbd>W</kbd> key</strong>.
+          Fuzzy subsequence match, no extra crate. This frame has one match. Wipe has <strong>no <kbd>W</kbd> key</strong>.
           Use this palette or the Actions row “Wipe environment…”. Both call backup-first
           <code>plan_wipe</code>.
         </figcaption>
@@ -383,6 +446,10 @@ cargo run -- --root /path/to/site</code></pre>
             <td>Visual-standard theme. Not nested in the app config dir. <code>version: 1</code> only.</td>
           </tr>
           <tr>
+            <td><code>~/.config/ldnddev/dd_pantheon/gui.json</code></td>
+            <td>Window only: density, vim letters, reduced motion. Not part of the site document or the theme file.</td>
+          </tr>
+          <tr>
             <td><code>~/.local/state/ldnddev/dd_pantheon/app.log</code></td>
             <td>Optional debug log when <code>debug_log = true</code> or <code>RUST_LOG</code> is set. Redacted argv only.</td>
           </tr>
@@ -391,7 +458,7 @@ cargo run -- --root /path/to/site</code></pre>
 
       <h2 id="safety">Safety</h2>
       <div class="callout ok">
-        <h3>Hard rules the TUI will not let you skip</h3>
+        <h3>Hard rules the cockpit will not let you skip</h3>
         <ul>
           <li>No silent <code>--yes</code>. The runner injects it only after a TUI confirm.</li>
           <li>One mutating job per slot (<code>site.env</code>, local path, or global).</li>

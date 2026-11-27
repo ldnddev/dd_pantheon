@@ -36,7 +36,7 @@ Do **not** commit `*.json` or `*.svg` — they are gitignored. Commit the PNGs.
 | File | How it is produced |
 |---|---|
 | `demo-cockpit.png` | default `--demo` (acme-wp.test selected) |
-| `demo-help.png` | `F1` |
+| `demo-help.png` | `?` (Settings, Help page) |
 | `demo-palette.png` | `:` then type `wipe` |
 | `demo-cms.png` | `m` |
 | `demo-deploy.png` | `e` on test (note form) |

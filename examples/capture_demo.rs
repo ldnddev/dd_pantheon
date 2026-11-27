@@ -56,7 +56,7 @@ fn main() -> Result<()> {
         &out,
         "demo-help",
         demo_app(&crate_root, &cfg)?,
-        &[key(KeyCode::F(1))],
+        &[key(KeyCode::Char('?'))],
     )?;
     dump(
         &out,
