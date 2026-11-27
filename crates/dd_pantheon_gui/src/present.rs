@@ -5,6 +5,9 @@ use dd_pantheon::plan::StagedPlan;
 use dd_pantheon::state::{AppState, FocusPane, Modal, TreeSel};
 use dd_pantheon::workflows::palette::{self, lando_command_enabled};
 
+/// Text dump the headless tests assert against. The window paints the same
+/// state through the row functions below, not this prefixed transcript.
+#[cfg(test)]
 pub fn cockpit(state: &AppState, footer: &str) -> Vec<String> {
     let mut lines = vec![
         "dd_pantheon".to_string(),
@@ -30,6 +33,7 @@ pub fn cockpit(state: &AppState, footer: &str) -> Vec<String> {
     lines
 }
 
+#[cfg(test)]
 pub fn header_line(state: &AppState) -> String {
     let mut parts = Vec::new();
     if state.demo {
@@ -54,6 +58,7 @@ pub fn header_status(state: &AppState) -> String {
     }
 }
 
+#[cfg(test)]
 pub fn focus_name(focus: FocusPane) -> &'static str {
     match focus {
         FocusPane::Tree => "tree",
